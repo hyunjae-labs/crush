@@ -105,6 +105,10 @@ type list[T Item] struct {
 	renderMu sync.Mutex
 	rendered string
 
+	// Virtual scrolling fields
+	virtualHeight int                     // Total height of all items
+	itemHeights   *csync.Map[string, int] // Cache of item heights
+
 	movingByItem       bool
 	selectionStartCol  int
 	selectionStartLine int
@@ -192,6 +196,7 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 		items:              csync.NewSliceFrom(items),
 		indexMap:           csync.NewMap[string, int](),
 		renderedItems:      csync.NewMap[string, renderedItem](),
+		itemHeights:        csync.NewMap[string, int](),
 		selectionStartCol:  -1,
 		selectionStartLine: -1,
 		selectionEndLine:   -1,
@@ -444,25 +449,18 @@ func (l *list[T]) View() string {
 		return ""
 	}
 	t := styles.CurrentTheme()
+	
+	// With virtual scrolling, rendered already contains only visible content
 	view := l.rendered
-	lines := strings.Split(view, "\n")
-
-	start, end := l.viewPosition()
-	viewStart := max(0, start)
-	viewEnd := min(len(lines), end+1)
-
-	if viewStart > viewEnd {
-		viewStart = viewEnd
-	}
-	lines = lines[viewStart:viewEnd]
-
+	
 	if l.resize {
-		return strings.Join(lines, "\n")
+		return view
 	}
+	
 	view = t.S().Base.
 		Height(l.height).
 		Width(l.width).
-		Render(strings.Join(lines, "\n"))
+		Render(view)
 
 	if !l.hasSelection() {
 		return view
@@ -472,31 +470,26 @@ func (l *list[T]) View() string {
 }
 
 func (l *list[T]) viewPosition() (int, int) {
+	// View position in the virtual space
 	start, end := 0, 0
-	renderedLines := lipgloss.Height(l.rendered) - 1
 	if l.direction == DirectionForward {
-		start = max(0, l.offset)
-		end = min(l.offset+l.height-1, renderedLines)
-	} else {
-		start = max(0, renderedLines-l.offset-l.height+1)
-		end = max(0, renderedLines-l.offset)
-	}
-	start = min(start, end)
-	return start, end
-}
-
-func (l *list[T]) recalculateItemPositions() {
-	currentContentHeight := 0
-	for _, item := range slices.Collect(l.items.Seq()) {
-		rItem, ok := l.renderedItems.Get(item.ID())
-		if !ok {
-			continue
+		start = l.offset
+		if l.virtualHeight > 0 {
+			end = min(l.offset+l.height-1, l.virtualHeight-1)
+		} else {
+			end = l.offset + l.height - 1
 		}
-		rItem.start = currentContentHeight
-		rItem.end = currentContentHeight + rItem.height - 1
-		l.renderedItems.Set(item.ID(), rItem)
-		currentContentHeight = rItem.end + 1 + l.gap
+	} else {
+		// For backward direction
+		if l.virtualHeight > 0 {
+			end = l.virtualHeight - l.offset - 1
+			start = max(0, end - l.height + 1)
+		} else {
+			end = 0
+			start = 0
+		}
 	}
+	return start, end
 }
 
 func (l *list[T]) render() tea.Cmd {
@@ -511,47 +504,21 @@ func (l *list[T]) render() tea.Cmd {
 	} else {
 		focusChangeCmd = l.blurSelectedItem()
 	}
-	// we are not rendering the first time
-	if l.rendered != "" {
-		// rerender everything will mostly hit cache
-		l.renderMu.Lock()
-		l.rendered, _ = l.renderIterator(0, false, "")
-		l.renderMu.Unlock()
-		if l.direction == DirectionBackward {
-			l.recalculateItemPositions()
-		}
-		// in the end scroll to the selected item
-		if l.focused {
-			l.scrollToSelection()
-		}
-		return focusChangeCmd
-	}
-	l.renderMu.Lock()
-	rendered, finishIndex := l.renderIterator(0, true, "")
-	l.rendered = rendered
-	l.renderMu.Unlock()
-	// recalculate for the initial items
-	if l.direction == DirectionBackward {
-		l.recalculateItemPositions()
-	}
-	renderCmd := func() tea.Msg {
-		l.offset = 0
-		// render the rest
 
-		l.renderMu.Lock()
-		l.rendered, _ = l.renderIterator(finishIndex, false, l.rendered)
-		l.renderMu.Unlock()
-		// needed for backwards
-		if l.direction == DirectionBackward {
-			l.recalculateItemPositions()
-		}
-		// in the end scroll to the selected item
-		if l.focused {
-			l.scrollToSelection()
-		}
-		return nil
+	// Calculate all item positions and total height
+	l.calculateItemPositions()
+
+	// Render only visible items
+	l.renderMu.Lock()
+	l.rendered = l.renderVirtualScrolling()
+	l.renderMu.Unlock()
+
+	// Scroll to selected item if focused
+	if l.focused {
+		l.scrollToSelection()
 	}
-	return tea.Batch(focusChangeCmd, renderCmd)
+
+	return focusChangeCmd
 }
 
 func (l *list[T]) setDefaultSelected() {
@@ -573,14 +540,26 @@ func (l *list[T]) scrollToSelection() {
 	}
 
 	start, end := l.viewPosition()
-	// item bigger or equal to the viewport do nothing
-	if rItem.start <= start && rItem.end >= end {
+	
+	// item bigger or equal to the viewport - show from start
+	if rItem.height >= l.height {
+		if l.direction == DirectionForward {
+			l.offset = rItem.start
+		} else {
+			if l.virtualHeight > 0 {
+			l.offset = l.virtualHeight - rItem.end
+		} else {
+			l.offset = 0
+		}
+		}
 		return
 	}
+	
 	// if we are moving by item we want to move the offset so that the
 	// whole item is visible not just portions of it
 	if l.movingByItem {
 		if rItem.start >= start && rItem.end <= end {
+			// Item is fully visible, no need to scroll
 			return
 		}
 		defer func() { l.movingByItem = false }()
@@ -594,30 +573,27 @@ func (l *list[T]) scrollToSelection() {
 		}
 	}
 
-	if rItem.height >= l.height {
-		if l.direction == DirectionForward {
-			l.offset = rItem.start
-		} else {
-			l.offset = max(0, lipgloss.Height(l.rendered)-(rItem.start+l.height))
-		}
-		return
-	}
-
-	renderedLines := lipgloss.Height(l.rendered) - 1
-
 	// If item is above the viewport, make it the first item
 	if rItem.start < start {
 		if l.direction == DirectionForward {
 			l.offset = rItem.start
 		} else {
-			l.offset = max(0, renderedLines-rItem.start-l.height+1)
+			if l.virtualHeight > 0 {
+			l.offset = l.virtualHeight - rItem.end
+		} else {
+			l.offset = 0
+		}
 		}
 	} else if rItem.end > end {
 		// If item is below the viewport, make it the last item
 		if l.direction == DirectionForward {
-			l.offset = max(0, rItem.end-l.height+1)
+			l.offset = max(0, rItem.end - l.height + 1)
 		} else {
-			l.offset = max(0, renderedLines-rItem.end)
+			if l.virtualHeight > 0 {
+			l.offset = max(0, l.virtualHeight - rItem.start - l.height + 1)
+		} else {
+			l.offset = 0
+		}
 		}
 	}
 }
@@ -795,96 +771,197 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// renderFragment holds updated rendered view fragments
-type renderFragment struct {
-	view string
-	gap  int
-}
 
-// renderIterator renders items starting from the specific index and limits height if limitHeight != -1
-// returns the last index and the rendered content so far
-// we pass the rendered content around and don't use l.rendered to prevent jumping of the content
-func (l *list[T]) renderIterator(startInx int, limitHeight bool, rendered string) (string, int) {
-	var fragments []renderFragment
 
-	currentContentHeight := lipgloss.Height(rendered) - 1
+// calculateItemPositions calculates and caches the position and height of all items.
+func (l *list[T]) calculateItemPositions() {
+	currentHeight := 0
 	itemsLen := l.items.Len()
-	finalIndex := itemsLen
 
-	// first pass: accumulate all fragments to render until the height limit is
-	// reached
-	for i := startInx; i < itemsLen; i++ {
-		if limitHeight && currentContentHeight >= l.height {
-			finalIndex = i
-			break
-		}
-		// cool way to go through the list in both directions
-		inx := i
-
-		if l.direction != DirectionForward {
-			inx = (itemsLen - 1) - i
-		}
-
-		item, ok := l.items.Get(inx)
+	// Always calculate positions in forward order (logical positions)
+	for i := 0; i < itemsLen; i++ {
+		item, ok := l.items.Get(i)
 		if !ok {
 			continue
 		}
 
-		var rItem renderedItem
-		if cache, ok := l.renderedItems.Get(item.ID()); ok {
-			rItem = cache
+		// Get or calculate item height
+		var height int
+		if cachedHeight, ok := l.itemHeights.Get(item.ID()); ok {
+			height = cachedHeight
 		} else {
-			rItem = l.renderItem(item)
-			rItem.start = currentContentHeight
-			rItem.end = currentContentHeight + rItem.height - 1
-			l.renderedItems.Set(item.ID(), rItem)
+			// Calculate and cache the height
+			view := item.View()
+			height = lipgloss.Height(view)
+			l.itemHeights.Set(item.ID(), height)
 		}
 
-		gap := l.gap + 1
-		if inx == itemsLen-1 {
-			gap = 0
-		}
-
-		fragments = append(fragments, renderFragment{view: rItem.view, gap: gap})
-
-		currentContentHeight = rItem.end + 1 + l.gap
-	}
-
-	// second pass: build rendered string efficiently
-	var b strings.Builder
-	if l.direction == DirectionForward {
-		b.WriteString(rendered)
-		for _, f := range fragments {
-			b.WriteString(f.view)
-			for range f.gap {
-				b.WriteByte('\n')
+		// Update or create rendered item with position info
+		var rItem renderedItem
+		if cached, ok := l.renderedItems.Get(item.ID()); ok {
+			rItem = cached
+			rItem.height = height
+		} else {
+			rItem = renderedItem{
+				id:     item.ID(),
+				height: height,
 			}
 		}
+		
+		rItem.start = currentHeight
+		rItem.end = currentHeight + rItem.height - 1
+		l.renderedItems.Set(item.ID(), rItem)
 
-		return b.String(), finalIndex
-	}
-
-	// iterate backwards as fragments are in reversed order
-	for i := len(fragments) - 1; i >= 0; i-- {
-		f := fragments[i]
-		b.WriteString(f.view)
-		for range f.gap {
-			b.WriteByte('\n')
+		currentHeight = rItem.end + 1
+		if i < itemsLen-1 {
+			currentHeight += l.gap
 		}
 	}
-	b.WriteString(rendered)
 
-	return b.String(), finalIndex
+	l.virtualHeight = currentHeight
 }
 
-func (l *list[T]) renderItem(item Item) renderedItem {
-	view := item.View()
-	return renderedItem{
-		id:     item.ID(),
-		view:   view,
-		height: lipgloss.Height(view),
+// renderVirtualScrolling renders only the visible portion of the list.
+func (l *list[T]) renderVirtualScrolling() string {
+	if l.items.Len() == 0 {
+		return ""
 	}
+
+	// Calculate viewport bounds
+	viewStart, viewEnd := l.viewPosition()
+	
+	// Find which items are visible
+	var visibleItems []struct {
+		item   T
+		rItem  renderedItem
+		index  int
+	}
+	
+	itemsLen := l.items.Len()
+	for i := 0; i < itemsLen; i++ {
+		item, ok := l.items.Get(i)
+		if !ok {
+			continue
+		}
+		
+		rItem, ok := l.renderedItems.Get(item.ID())
+		if !ok {
+			continue
+		}
+		
+		// Check if item is visible (overlaps with viewport)
+		if rItem.end >= viewStart && rItem.start <= viewEnd {
+			visibleItems = append(visibleItems, struct {
+				item  T
+				rItem renderedItem
+				index int
+			}{item, rItem, i})
+		}
+		
+		// Early exit if we've passed the viewport
+		if rItem.start > viewEnd {
+			break
+		}
+	}
+	
+	if len(visibleItems) == 0 {
+		// Return empty lines to maintain height
+		var lines []string
+		for i := 0; i < l.height; i++ {
+			lines = append(lines, "")
+		}
+		return strings.Join(lines, "\n")
+	}
+	
+	// Render visible items
+	var b strings.Builder
+	currentLine := viewStart
+	
+	// Handle first visible item
+	firstVisible := visibleItems[0]
+	if firstVisible.rItem.start < viewStart {
+		// We're starting mid-item, render partial
+		if cached, ok := l.renderedItems.Get(firstVisible.item.ID()); ok && cached.view != "" {
+			lines := strings.Split(cached.view, "\n")
+			skipLines := viewStart - firstVisible.rItem.start
+			if skipLines >= 0 && skipLines < len(lines) {
+				for i := skipLines; i < len(lines); i++ {
+					if currentLine > viewEnd {
+						break
+					}
+					b.WriteString(lines[i])
+					b.WriteByte('\n')
+					currentLine++
+				}
+			}
+		}
+	} else if firstVisible.rItem.start > viewStart {
+		// Add empty lines before first item
+		for currentLine < firstVisible.rItem.start && currentLine <= viewEnd {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			currentLine++
+		}
+	}
+	
+	// Render fully visible items
+	for i, vis := range visibleItems {
+		if currentLine > viewEnd {
+			break
+		}
+		
+		// Skip first item if we already rendered it partially
+		if i == 0 && firstVisible.rItem.start < viewStart {
+			continue
+		}
+		
+		// Add gap before item (except for first)
+		if i > 0 && currentLine <= viewEnd {
+			for j := 0; j < l.gap && currentLine <= viewEnd; j++ {
+				b.WriteByte('\n')
+				currentLine++
+			}
+		}
+		
+		// Render item or use cache
+		var view string
+		if cached, ok := l.renderedItems.Get(vis.item.ID()); ok && cached.view != "" {
+			view = cached.view
+		} else {
+			view = vis.item.View()
+			// Update cache
+			rItem := vis.rItem
+			rItem.view = view
+			l.renderedItems.Set(vis.item.ID(), rItem)
+		}
+		
+		// Handle partial rendering if item extends beyond viewport
+		lines := strings.Split(view, "\n")
+		for _, line := range lines {
+			if currentLine > viewEnd {
+				break
+			}
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(line)
+			currentLine++
+		}
+	}
+	
+	// Fill remaining viewport with empty lines if needed
+	for currentLine <= viewEnd {
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		currentLine++
+	}
+	
+	return b.String()
 }
+
+
 
 // AppendItem implements List.
 func (l *list[T]) AppendItem(item T) tea.Cmd {
@@ -922,7 +999,9 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 				if l.items.Len() > 1 {
 					newLines += l.gap
 				}
-				l.offset = min(lipgloss.Height(l.rendered)-1, l.offset+newLines)
+				if l.virtualHeight > 0 {
+					l.offset = min(l.virtualHeight-1, l.offset+newLines)
+				}
 			}
 		}
 	}
@@ -961,7 +1040,7 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 	}
 	cmd := l.render()
 	if l.rendered != "" {
-		renderedHeight := lipgloss.Height(l.rendered)
+		renderedHeight := l.virtualHeight
 		if renderedHeight <= l.height {
 			l.offset = 0
 		} else {
@@ -1012,7 +1091,7 @@ func (l *list[T]) Items() []T {
 }
 
 func (l *list[T]) incrementOffset(n int) {
-	renderedHeight := lipgloss.Height(l.rendered)
+	renderedHeight := l.virtualHeight
 	// no need for offset
 	if renderedHeight <= l.height {
 		return
@@ -1129,7 +1208,9 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 				if l.items.Len() > 1 {
 					newLines += l.gap
 				}
-				l.offset = min(lipgloss.Height(l.rendered)-1, l.offset+newLines)
+				if l.virtualHeight > 0 {
+					l.offset = min(l.virtualHeight-1, l.offset+newLines)
+				}
 			}
 		}
 	}
@@ -1236,6 +1317,8 @@ func (l *list[T]) reset(selectedItem string) tea.Cmd {
 	l.selectedItem = selectedItem
 	l.indexMap = csync.NewMap[string, int]()
 	l.renderedItems = csync.NewMap[string, renderedItem]()
+	l.itemHeights = csync.NewMap[string, int]()
+	l.virtualHeight = 0
 	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 		if l.width > 0 && l.height > 0 {
@@ -1266,10 +1349,17 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 		oldItem, hasOldItem := l.renderedItems.Get(id)
 		oldPosition := l.offset
 		if l.direction == DirectionBackward {
-			oldPosition = (lipgloss.Height(l.rendered) - 1) - l.offset
+			if l.virtualHeight > 0 {
+			oldPosition = (l.virtualHeight - 1) - l.offset
+		} else {
+			oldPosition = 0
+		}
 		}
 
+		// Clear caches for this item
 		l.renderedItems.Del(id)
+		l.itemHeights.Del(id)
+		
 		cmd := l.render()
 
 		// need to check for nil because of sequence not handling nil
@@ -1283,14 +1373,22 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 				newItem, ok := l.renderedItems.Get(item.ID())
 				if ok {
 					newLines := newItem.height - oldItem.height
-					l.offset = util.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
+					if l.virtualHeight > 0 {
+					l.offset = util.Clamp(l.offset+newLines, 0, l.virtualHeight-1)
+				} else {
+					l.offset = 0
+				}
 				}
 			}
 		} else if hasOldItem && l.offset > oldItem.start {
 			newItem, ok := l.renderedItems.Get(item.ID())
 			if ok {
 				newLines := newItem.height - oldItem.height
-				l.offset = util.Clamp(l.offset+newLines, 0, lipgloss.Height(l.rendered)-1)
+				if l.virtualHeight > 0 {
+					l.offset = util.Clamp(l.offset+newLines, 0, l.virtualHeight-1)
+				} else {
+					l.offset = 0
+				}
 			}
 		}
 	}
