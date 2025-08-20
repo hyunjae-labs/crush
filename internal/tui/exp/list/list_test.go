@@ -26,20 +26,19 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionForward(), WithSize(10, 20)).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[0].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
 		require.Equal(t, 5, l.items.Len())
-		require.Equal(t, 5, l.renderedItems.Len())
+		require.Equal(t, 5, len(l.itemPositions))
 		assert.Equal(t, 5, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 4, end)
 		for i := range 5 {
-			item, ok := l.renderedItems.Get(items[i].ID())
-			require.True(t, ok)
+			item := l.itemPositions[i]
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
 		}
@@ -56,20 +55,19 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionBackward(), WithSize(10, 20)).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[4].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
 		require.Equal(t, 5, l.items.Len())
-		require.Equal(t, 5, l.renderedItems.Len())
+		require.Equal(t, 5, len(l.itemPositions))
 		assert.Equal(t, 5, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 4, end)
 		for i := range 5 {
-			item, ok := l.renderedItems.Get(items[i].ID())
-			require.True(t, ok)
+			item := l.itemPositions[i]
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
 		}
@@ -87,20 +85,20 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[0].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
-		assert.Equal(t, 30, lipgloss.Height(l.rendered))
+		require.Equal(t, 30, len(l.itemPositions))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 9, end)
 		for i := range 30 {
-			item, ok := l.renderedItems.Get(items[i].ID())
-			require.True(t, ok)
+			item := l.itemPositions[i]
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
 		}
@@ -117,20 +115,20 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[29].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
-		assert.Equal(t, 30, lipgloss.Height(l.rendered))
+		require.Equal(t, 30, len(l.itemPositions))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
 		start, end := l.viewPosition()
 		assert.Equal(t, 20, start)
 		assert.Equal(t, 29, end)
 		for i := range 30 {
-			item, ok := l.renderedItems.Get(items[i].ID())
-			require.True(t, ok)
+			item := l.itemPositions[i]
 			assert.Equal(t, i, item.start)
 			assert.Equal(t, i, item.end)
 		}
@@ -150,12 +148,12 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionForward(), WithSize(10, 10)).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[0].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
+		require.Equal(t, 30, len(l.itemPositions))
 		expectedLines := 0
 		for i := range 30 {
 			expectedLines += (i + 1) * 1
@@ -170,8 +168,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, 9, end)
 		currentPosition := 0
 		for i := range 30 {
-			rItem, ok := l.renderedItems.Get(items[i].ID())
-			require.True(t, ok)
+			rItem := l.itemPositions[i]
 			assert.Equal(t, currentPosition, rItem.start)
 			assert.Equal(t, currentPosition+i, rItem.end)
 			currentPosition += i + 1
@@ -191,12 +188,12 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionBackward(), WithSize(10, 10)).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[29].ID(), l.selectedItem)
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
-		require.Equal(t, 30, l.renderedItems.Len())
+		require.Equal(t, 30, len(l.itemPositions))
 		expectedLines := 0
 		for i := range 30 {
 			expectedLines += (i + 1) * 1
@@ -211,8 +208,7 @@ func TestList(t *testing.T) {
 		assert.Equal(t, expectedLines-1, end)
 		currentPosition := 0
 		for i := range 30 {
-			rItem, ok := l.renderedItems.Get(items[i].ID())
-			require.True(t, ok)
+			rItem := l.itemPositions[i]
 			assert.Equal(t, currentPosition, rItem.start)
 			assert.Equal(t, currentPosition+i, rItem.end)
 			currentPosition += i + 1
@@ -233,7 +229,7 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionForward(), WithSize(10, 10), WithSelectedItem(items[10].ID())).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[10].ID(), l.selectedItem)
 
 		golden.RequireEqual(t, []byte(l.View()))
@@ -251,7 +247,7 @@ func TestList(t *testing.T) {
 		l := New(items, WithDirectionBackward(), WithSize(10, 10), WithSelectedItem(items[10].ID())).(*list[Item])
 		execCmd(l, l.Init())
 
-		// should select the last item
+		// should select item 10
 		assert.Equal(t, items[10].ID(), l.selectedItem)
 
 		golden.RequireEqual(t, []byte(l.View()))
@@ -365,7 +361,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 5, l.offset)
-		assert.Equal(t, 33, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 	t.Run("should stay at the position it is when the hight of an item below is increased in backwards list", func(t *testing.T) {
@@ -385,7 +382,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 4, l.offset)
-		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 	t.Run("should stay at the position it is when the hight of an item below is decreases in backwards list", func(t *testing.T) {
@@ -406,7 +404,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 0, l.offset)
-		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 	t.Run("should stay at the position it is when the hight of an item above is increased in backwards list", func(t *testing.T) {
@@ -426,7 +425,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 2, l.offset)
-		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 	t.Run("should stay at the position it is if an item is prepended and we are in backwards list", func(t *testing.T) {
@@ -445,7 +445,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 2, l.offset)
-		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 
@@ -482,7 +483,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 5, l.offset)
-		assert.Equal(t, 33, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 
@@ -503,7 +505,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 4, l.offset)
-		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 
@@ -525,7 +528,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 1, l.offset)
-		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 
@@ -546,7 +550,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 2, l.offset)
-		assert.Equal(t, 32, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 	t.Run("should stay at the position it is if an item is appended and we are in forward list", func(t *testing.T) {
@@ -565,7 +570,8 @@ func TestListMovement(t *testing.T) {
 		viewAfter := l.View()
 		assert.Equal(t, viewBefore, viewAfter)
 		assert.Equal(t, 2, l.offset)
-		assert.Equal(t, 31, lipgloss.Height(l.rendered))
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
 }
