@@ -160,8 +160,11 @@ func TestList(t *testing.T) {
 		for i := range 30 {
 			expectedLines += (i + 1) * 1
 		}
-		assert.Equal(t, expectedLines, lipgloss.Height(l.rendered))
-		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
+		if len(l.rendered) > 0 {
+			assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+		}
 		start, end := l.viewPosition()
 		assert.Equal(t, 0, start)
 		assert.Equal(t, 9, end)
@@ -198,8 +201,11 @@ func TestList(t *testing.T) {
 		for i := range 30 {
 			expectedLines += (i + 1) * 1
 		}
-		assert.Equal(t, expectedLines, lipgloss.Height(l.rendered))
-		assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+		// With virtual scrolling, rendered height should be viewport height (10)
+		assert.Equal(t, 10, lipgloss.Height(l.rendered))
+		if len(l.rendered) > 0 {
+			assert.NotEqual(t, "\n", string(l.rendered[len(l.rendered)-1]), "should not end in newline")
+		}
 		start, end := l.viewPosition()
 		assert.Equal(t, expectedLines-10, start)
 		assert.Equal(t, expectedLines-1, end)

@@ -217,7 +217,43 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 
 // Init implements List.
 func (l *list[T]) Init() tea.Cmd {
-	return l.render()
+	// Ensure we have width and height
+	if l.width <= 0 || l.height <= 0 {
+		// Can't calculate positions without dimensions
+		return nil
+	}
+	
+	// Set size for all items
+	var cmds []tea.Cmd
+	for _, item := range slices.Collect(l.items.Seq()) {
+		if cmd := item.SetSize(l.width, l.height); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	
+	// For backward lists, we need to position at the bottom after initial render
+	if l.direction == DirectionBackward && l.offset == 0 && l.items.Len() > 0 {
+		// Calculate positions first
+		l.calculateItemPositions()
+		// Set offset to show the bottom of the list
+		if l.virtualHeight > l.height {
+			l.offset = 0 // In backward mode, offset 0 means bottom
+		}
+		// Select the last item
+		l.selectLastItem()
+	}
+	
+	// Scroll to the selected item for initial positioning
+	if l.focused {
+		l.scrollToSelection()
+	}
+	
+	renderCmd := l.render()
+	if renderCmd != nil {
+		cmds = append(cmds, renderCmd)
+	}
+	
+	return tea.Batch(cmds...)
 }
 
 // Update implements List.
@@ -546,11 +582,9 @@ func (l *list[T]) scrollToSelection() {
 		if l.direction == DirectionForward {
 			l.offset = rItem.start
 		} else {
-			if l.virtualHeight > 0 {
-			l.offset = l.virtualHeight - rItem.end
-		} else {
+			// For backward direction, we want to show the bottom of the item
+			// offset = 0 means bottom of list is visible
 			l.offset = 0
-		}
 		}
 		return
 	}
@@ -830,6 +864,26 @@ func (l *list[T]) renderVirtualScrolling() string {
 	// Calculate viewport bounds
 	viewStart, viewEnd := l.viewPosition()
 	
+	// Debug: Check if viewport is valid
+	if viewEnd < viewStart {
+		// Return empty viewport
+		var lines []string
+		for i := 0; i < l.height; i++ {
+			lines = append(lines, "")
+		}
+		return strings.Join(lines, "\n")
+	}
+	
+	// Debug: Check if we have any rendered items
+	if l.renderedItems.Len() == 0 {
+		// No items have been calculated yet, return empty
+		var lines []string
+		for i := 0; i < l.height; i++ {
+			lines = append(lines, "")
+		}
+		return strings.Join(lines, "\n")
+	}
+	
 	// Find which items are visible
 	var visibleItems []struct {
 		item   T
@@ -846,6 +900,7 @@ func (l *list[T]) renderVirtualScrolling() string {
 		
 		rItem, ok := l.renderedItems.Get(item.ID())
 		if !ok {
+			// Item not yet calculated, skip it
 			continue
 		}
 		
@@ -865,6 +920,7 @@ func (l *list[T]) renderVirtualScrolling() string {
 	}
 	
 	if len(visibleItems) == 0 {
+		// No visible items found - this shouldn't happen if viewport is valid
 		// Return empty lines to maintain height
 		var lines []string
 		for i := 0; i < l.height; i++ {
