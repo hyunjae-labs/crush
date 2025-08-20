@@ -529,6 +529,10 @@ func (l *list[T]) viewPosition() (int, int) {
 }
 
 func (l *list[T]) render() tea.Cmd {
+	return l.renderWithScrollToSelection(true)
+}
+
+func (l *list[T]) renderWithScrollToSelection(scrollToSelection bool) tea.Cmd {
 	if l.width <= 0 || l.height <= 0 || l.items.Len() == 0 {
 		return nil
 	}
@@ -549,8 +553,8 @@ func (l *list[T]) render() tea.Cmd {
 	l.rendered = l.renderVirtualScrolling()
 	l.renderMu.Unlock()
 
-	// Scroll to selected item if focused
-	if l.focused {
+	// Scroll to selected item if focused and requested
+	if l.focused && scrollToSelection {
 		l.scrollToSelection()
 	}
 
@@ -677,12 +681,12 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 			// If the item is bigger than the viewport, select it
 			if renderedItem.start <= start && renderedItem.end >= end {
 				l.selectedItem = item.ID()
-				return l.render()
+				return l.renderWithScrollToSelection(false)
 			}
 			// item is in the view
 			if renderedItem.start >= start && renderedItem.start <= end {
 				l.selectedItem = item.ID()
-				return l.render()
+				return l.renderWithScrollToSelection(false)
 			}
 		}
 	} else if itemMiddle > end {
@@ -705,12 +709,12 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 			// If the item is bigger than the viewport, select it
 			if renderedItem.start <= start && renderedItem.end >= end {
 				l.selectedItem = item.ID()
-				return l.render()
+				return l.renderWithScrollToSelection(false)
 			}
 			// item is in the view
 			if renderedItem.end >= start && renderedItem.end <= end {
 				l.selectedItem = item.ID()
-				return l.render()
+				return l.renderWithScrollToSelection(false)
 			}
 		}
 	}
@@ -912,24 +916,10 @@ func (l *list[T]) renderVirtualScrolling() string {
 	// Calculate viewport bounds
 	viewStart, viewEnd := l.viewPosition()
 	
-	// Debug: Check if viewport is valid
-	if viewEnd < viewStart {
-		// Return empty viewport
-		var lines []string
-		for i := 0; i < l.height; i++ {
-			lines = append(lines, "")
-		}
-		return strings.Join(lines, "\n")
-	}
-	
 	// Check if we have any positions calculated
 	if len(l.itemPositions) == 0 {
-		// No items have been calculated yet, return empty
-		var lines []string
-		for i := 0; i < l.height; i++ {
-			lines = append(lines, "")
-		}
-		return strings.Join(lines, "\n")
+		// No positions calculated yet, return empty viewport
+		return ""
 	}
 	
 	// Find which items are visible
@@ -941,13 +931,7 @@ func (l *list[T]) renderVirtualScrolling() string {
 	
 	itemsLen := l.items.Len()
 	for i := 0; i < itemsLen; i++ {
-		item, ok := l.items.Get(i)
-		if !ok {
-			continue
-		}
-		
 		if i >= len(l.itemPositions) {
-			// Item not yet calculated, skip it
 			continue
 		}
 		
@@ -955,6 +939,10 @@ func (l *list[T]) renderVirtualScrolling() string {
 		
 		// Check if item is visible (overlaps with viewport)
 		if pos.end >= viewStart && pos.start <= viewEnd {
+			item, ok := l.items.Get(i)
+			if !ok {
+				continue
+			}
 			visibleItems = append(visibleItems, struct {
 				item  T
 				pos   itemPosition
@@ -968,106 +956,60 @@ func (l *list[T]) renderVirtualScrolling() string {
 		}
 	}
 	
-	if len(visibleItems) == 0 {
-		// No visible items found - this shouldn't happen if viewport is valid
-		// Return empty lines to maintain height
-		var lines []string
-		for i := 0; i < l.height; i++ {
-			lines = append(lines, "")
-		}
-		return strings.Join(lines, "\n")
-	}
-	
-	// Render visible items
-	var b strings.Builder
+	// Build the rendered output
+	var lines []string
 	currentLine := viewStart
 	
-	// Handle first visible item
-	firstVisible := visibleItems[0]
-	if firstVisible.pos.start < viewStart {
-		// We're starting mid-item, render partial
-		if cached, ok := l.viewCache.Get(firstVisible.item.ID()); ok && cached != "" {
-			lines := strings.Split(cached, "\n")
-			skipLines := viewStart - firstVisible.pos.start
-			if skipLines >= 0 && skipLines < len(lines) {
-				for i := skipLines; i < len(lines) && currentLine <= viewEnd; i++ {
-					if b.Len() > 0 {
-						b.WriteByte('\n')
-					}
-					b.WriteString(lines[i])
-					currentLine++
-				}
-			}
-		}
-	} else if firstVisible.pos.start > viewStart {
-		// Add empty lines before first item
-		for currentLine < firstVisible.pos.start && currentLine <= viewEnd {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			currentLine++
-		}
-	}
-	
-	// Render fully visible items
-	for i, vis := range visibleItems {
-		if currentLine > viewEnd {
-			break
-		}
-		
-		// Skip first item if we already rendered it partially
-		if i == 0 && firstVisible.pos.start < viewStart {
-			// Update currentLine to where we left off after partial rendering
-			currentLine = viewStart + (firstVisible.pos.end - firstVisible.pos.start + 1) - (viewStart - firstVisible.pos.start)
-			continue
-		}
-		
-		// Add gap before item (except for first visible item in viewport)
-		if i > 0 || (i == 0 && firstVisible.pos.start >= viewStart) {
-			// Only add gap if this isn't the very first item in the viewport
-			if currentLine > viewStart && currentLine <= viewEnd {
-				for j := 0; j < l.gap && currentLine <= viewEnd; j++ {
-					if b.Len() > 0 {
-						b.WriteByte('\n')
-					}
-					currentLine++
-				}
-			}
-		}
-		
-		// Render item or use cache
+	for _, vis := range visibleItems {
+		// Get or render the item's view
 		var view string
-		if cached, ok := l.viewCache.Get(vis.item.ID()); ok && cached != "" {
+		if cached, ok := l.viewCache.Get(vis.item.ID()); ok {
 			view = cached
 		} else {
 			view = vis.item.View()
-			// Update cache
 			l.viewCache.Set(vis.item.ID(), view)
 		}
 		
-		// Handle partial rendering if item extends beyond viewport
-		lines := strings.Split(view, "\n")
-		for _, line := range lines {
-			if currentLine > viewEnd {
-				break
+		itemLines := strings.Split(view, "\n")
+		
+		// Add gap lines before item if needed (except for first item)
+		if vis.index > 0 && currentLine < vis.pos.start {
+			gapLines := vis.pos.start - currentLine
+			for i := 0; i < gapLines; i++ {
+				lines = append(lines, "")
+				currentLine++
 			}
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(line)
+		}
+		
+		// Determine which lines of this item to include
+		startLine := 0
+		if vis.pos.start < viewStart {
+			// Item starts before viewport, skip some lines
+			startLine = viewStart - vis.pos.start
+		}
+		
+		// Add the item's visible lines
+		for i := startLine; i < len(itemLines) && currentLine <= viewEnd; i++ {
+			lines = append(lines, itemLines[i])
 			currentLine++
 		}
 	}
 	
-	// Fill remaining viewport with empty lines if needed
-	for currentLine <= viewEnd {
-		if b.Len() > 0 {
-			b.WriteByte('\n')
+	// For content that fits entirely in viewport, don't pad with empty lines
+	// Only pad if we have scrolled or if content is larger than viewport
+	if l.virtualHeight > l.height || l.offset > 0 {
+		// Fill remaining viewport with empty lines if needed
+		for len(lines) < l.height {
+			lines = append(lines, "")
 		}
-		currentLine++
+		
+		// Trim to viewport height
+		if len(lines) > l.height {
+			lines = lines[:l.height]
+		}
 	}
 	
-	return b.String()
+	return strings.Join(lines, "\n")
 }
 
 
@@ -1307,27 +1249,38 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 	if l.width > 0 && l.height > 0 {
 		cmds = append(cmds, item.SetSize(l.width, l.height))
 	}
-	cmds = append(cmds, l.render())
+	
+	// Recalculate positions after prepending
+	l.calculateItemPositions()
+	
 	if l.direction == DirectionForward {
 		if l.offset == 0 {
+			// If we're at the top, stay at the top
+			cmds = append(cmds, l.render())
 			cmd := l.GoToTop()
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			// Get the new item's position to adjust offset
-			newInx := l.items.Len() - 1
-			if newInx < len(l.itemPositions) {
-				newItem := l.itemPositions[newInx]
+			// Adjust offset to maintain viewport position
+			// The prepended item is at index 0
+			if len(l.itemPositions) > 0 {
+				newItem := l.itemPositions[0]
 				newLines := newItem.height
 				if l.items.Len() > 1 {
 					newLines += l.gap
 				}
+				// Increase offset to keep the same content visible
 				if l.virtualHeight > 0 {
-					l.offset = min(l.virtualHeight-1, l.offset+newLines)
+					l.offset = min(l.virtualHeight-l.height, l.offset+newLines)
 				}
 			}
+			cmds = append(cmds, l.renderWithScrollToSelection(false))
 		}
+	} else {
+		// For backward direction, prepending doesn't affect the offset
+		// since offset is from the bottom
+		cmds = append(cmds, l.render())
 	}
 	return tea.Batch(cmds...)
 }
@@ -1460,21 +1413,12 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 	var cmds []tea.Cmd
 	if inx, ok := l.indexMap.Get(id); ok {
-		// Store old height if we have it
-		var oldHeight int
+		// Store old item position info before update
+		var oldItemPos itemPosition
 		hasOldItem := false
 		if inx < len(l.itemPositions) {
-			oldHeight = l.itemPositions[inx].height
+			oldItemPos = l.itemPositions[inx]
 			hasOldItem = true
-		}
-		
-		oldPosition := l.offset
-		if l.direction == DirectionBackward {
-			if l.virtualHeight > 0 {
-				oldPosition = (l.virtualHeight - 1) - l.offset
-			} else {
-				oldPosition = 0
-			}
 		}
 
 		// Update the item
@@ -1483,31 +1427,49 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 		// Clear cache for this item
 		l.viewCache.Del(id)
 		
-		cmd := l.render()
-
-		// need to check for nil because of sequence not handling nil
+		// Recalculate positions to get new height
+		l.calculateItemPositions()
+		
+		// Adjust offset if item height changed and it's outside the viewport
+		if hasOldItem && inx < len(l.itemPositions) {
+			newItemPos := l.itemPositions[inx]
+			heightDiff := newItemPos.height - oldItemPos.height
+			
+			if heightDiff != 0 {
+				// Get current viewport position
+				viewStart, viewEnd := l.viewPosition()
+				
+				if l.direction == DirectionForward {
+					// Item is above viewport if its end is before viewport start
+					if oldItemPos.end < viewStart {
+						// Adjust offset to maintain viewport content
+						l.offset = max(0, l.offset + heightDiff)
+					}
+				} else {
+					// For backward direction:
+					// Check if item is outside the current viewport
+					// Item is completely below viewport if its start is after viewport end
+					if oldItemPos.start > viewEnd {
+						// Item below viewport increased height, increase offset to maintain view
+						l.offset = max(0, l.offset + heightDiff)
+					} else if oldItemPos.end < viewStart {
+						// Item is completely above viewport
+						// No offset adjustment needed for items above in backward direction
+						// because they don't affect the view from bottom
+					}
+				}
+			}
+		}
+		
+		// Re-render with updated positions and offset
+		cmd := l.renderWithScrollToSelection(false)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		
-		// Adjust offset if needed based on height change
-		if hasOldItem && inx < len(l.itemPositions) {
-			newHeight := l.itemPositions[inx].height
-			diff := newHeight - oldHeight
-			
-			if l.direction == DirectionBackward {
-				// if we are the last item and there is no offset
-				// make sure to go to the bottom
-				if oldPosition < l.itemPositions[inx].end {
-					if diff != 0 && l.virtualHeight > 0 {
-						l.offset = util.Clamp(l.offset+diff, 0, l.virtualHeight-1)
-					}
-				}
-			} else if hasOldItem && l.offset > l.itemPositions[inx].start {
-				if diff != 0 && l.virtualHeight > 0 {
-					l.offset = util.Clamp(l.offset+diff, 0, l.virtualHeight-1)
-				}
-			}
+		cmds = append(cmds, item.Init())
+		if l.width > 0 && l.height > 0 {
+			cmds = append(cmds, item.SetSize(l.width, l.height))
 		}
 	}
 	return tea.Sequence(cmds...)
