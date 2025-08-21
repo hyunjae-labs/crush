@@ -61,18 +61,18 @@ func createBenchItems(n int) []Item {
 // BenchmarkListRender benchmarks the render performance with different list sizes
 func BenchmarkListRender(b *testing.B) {
 	sizes := []int{100, 500, 1000, 5000, 10000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Items_%d", size), func(b *testing.B) {
 			items := createBenchItems(size)
 			list := New(items, WithDirectionForward()).(*list[Item])
-			
+
 			// Set dimensions
 			list.SetSize(80, 30)
-			
+
 			// Initialize to calculate positions
 			list.Init()
-			
+
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				list.render()
@@ -84,18 +84,18 @@ func BenchmarkListRender(b *testing.B) {
 // BenchmarkListScroll benchmarks scrolling performance
 func BenchmarkListScroll(b *testing.B) {
 	sizes := []int{100, 500, 1000, 5000, 10000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Items_%d", size), func(b *testing.B) {
 			items := createBenchItems(size)
 			list := New(items, WithDirectionForward())
-			
+
 			// Set dimensions
 			list.SetSize(80, 30)
-			
+
 			// Initialize
 			list.Init()
-			
+
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				// Scroll down and up
@@ -109,19 +109,19 @@ func BenchmarkListScroll(b *testing.B) {
 // BenchmarkListView benchmarks the View() method performance
 func BenchmarkListView(b *testing.B) {
 	sizes := []int{100, 500, 1000, 5000, 10000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Items_%d", size), func(b *testing.B) {
 			items := createBenchItems(size)
 			list := New(items, WithDirectionForward()).(*list[Item])
-			
+
 			// Set dimensions
 			list.SetSize(80, 30)
-			
+
 			// Initialize and render once
 			list.Init()
 			list.render()
-			
+
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				_ = list.View()
@@ -133,11 +133,11 @@ func BenchmarkListView(b *testing.B) {
 // BenchmarkListMemory benchmarks memory allocation
 func BenchmarkListMemory(b *testing.B) {
 	sizes := []int{100, 500, 1000, 5000, 10000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Items_%d", size), func(b *testing.B) {
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				items := createBenchItems(size)
 				list := New(items, WithDirectionForward()).(*list[Item])
@@ -157,7 +157,7 @@ func BenchmarkVirtualScrolling(b *testing.B) {
 	list := New(items, WithDirectionForward()).(*list[Item])
 	list.SetSize(80, 30)
 	list.Init()
-	
+
 	b.Run("RenderVisibleOnly", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -165,7 +165,7 @@ func BenchmarkVirtualScrolling(b *testing.B) {
 			list.renderVirtualScrolling()
 		}
 	})
-	
+
 	b.Run("ScrollThroughList", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -182,13 +182,13 @@ func BenchmarkVirtualScrolling(b *testing.B) {
 // BenchmarkCalculatePositions benchmarks position calculation
 func BenchmarkCalculatePositions(b *testing.B) {
 	sizes := []int{100, 500, 1000, 5000, 10000}
-	
+
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Items_%d", size), func(b *testing.B) {
 			items := createBenchItems(size)
 			list := New(items, WithDirectionForward()).(*list[Item])
 			list.SetSize(80, 30)
-			
+
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				list.calculateItemPositions()

@@ -99,9 +99,10 @@ type list[T Item] struct {
 	items    *csync.Slice[T]
 
 	// Virtual scrolling fields - using slices for O(1) index access
-	itemPositions []itemPosition // Position info for each item by index
-	virtualHeight int             // Total height of all items
-	viewCache     *csync.Map[string, string] // Optional cache for rendered views
+	itemPositions  []itemPosition             // Position info for each item by index
+	virtualHeight  int                        // Total height of all items
+	viewCache      *csync.Map[string, string] // Optional cache for rendered views
+	positionsDirty bool                       // Flag to track if positions need recalculation
 
 	renderMu sync.Mutex
 	rendered string
@@ -194,6 +195,7 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 		indexMap:           csync.NewMap[string, int](),
 		itemPositions:      make([]itemPosition, len(items)),
 		viewCache:          csync.NewMap[string, string](),
+		positionsDirty:     true, // Mark as dirty initially
 		selectionStartCol:  -1,
 		selectionStartLine: -1,
 		selectionEndLine:   -1,
@@ -219,7 +221,7 @@ func (l *list[T]) Init() tea.Cmd {
 		// Can't calculate positions without dimensions
 		return nil
 	}
-	
+
 	// Set size for all items
 	var cmds []tea.Cmd
 	for _, item := range slices.Collect(l.items.Seq()) {
@@ -227,10 +229,10 @@ func (l *list[T]) Init() tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	
+
 	// Calculate positions for all items
 	l.calculateItemPositions()
-	
+
 	// For backward lists, we need to position at the bottom after initial render
 	if l.direction == DirectionBackward && l.offset == 0 && l.items.Len() > 0 {
 		// Set offset to show the bottom of the list
@@ -242,17 +244,17 @@ func (l *list[T]) Init() tea.Cmd {
 			l.selectLastItem()
 		}
 	}
-	
+
 	// Scroll to the selected item for initial positioning
 	if l.focused {
 		l.scrollToSelection()
 	}
-	
+
 	renderCmd := l.render()
 	if renderCmd != nil {
 		cmds = append(cmds, renderCmd)
 	}
-	
+
 	return tea.Batch(cmds...)
 }
 
@@ -265,16 +267,42 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return l, nil
 	case anim.StepMsg:
+		// Only update animations for visible items to avoid unnecessary renders
+		viewStart, viewEnd := l.viewPosition()
+		var needsRender bool
 		var cmds []tea.Cmd
-		for _, item := range slices.Collect(l.items.Seq()) {
+
+		for inx, item := range slices.Collect(l.items.Seq()) {
 			if i, ok := any(item).(HasAnim); ok && i.Spinning() {
+				// Check if item is visible
+				isVisible := false
+				if inx < len(l.itemPositions) {
+					pos := l.itemPositions[inx]
+					isVisible = pos.end >= viewStart && pos.start <= viewEnd
+				}
+
+				// Always update the animation state
 				updated, cmd := i.Update(msg)
 				cmds = append(cmds, cmd)
-				if u, ok := updated.(T); ok {
-					cmds = append(cmds, l.UpdateItem(u.ID(), u))
+
+				// Only trigger render if the spinning item is visible
+				if isVisible {
+					needsRender = true
+					// Clear the cache for this item so it re-renders
+					if u, ok := updated.(T); ok {
+						l.viewCache.Del(u.ID())
+					}
 				}
 			}
 		}
+
+		// Only re-render if we have visible spinning items
+		if needsRender {
+			l.renderMu.Lock()
+			l.rendered = l.renderVirtualScrolling()
+			l.renderMu.Unlock()
+		}
+
 		return l, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		if l.focused {
@@ -485,14 +513,14 @@ func (l *list[T]) View() string {
 		return ""
 	}
 	t := styles.CurrentTheme()
-	
+
 	// With virtual scrolling, rendered already contains only visible content
 	view := l.rendered
-	
+
 	if l.resize {
 		return view
 	}
-	
+
 	view = t.S().Base.
 		Height(l.height).
 		Width(l.width).
@@ -519,7 +547,7 @@ func (l *list[T]) viewPosition() (int, int) {
 		// For backward direction
 		if l.virtualHeight > 0 {
 			end = l.virtualHeight - l.offset - 1
-			start = max(0, end - l.height + 1)
+			start = max(0, end-l.height+1)
 		} else {
 			end = 0
 			start = 0
@@ -545,8 +573,11 @@ func (l *list[T]) renderWithScrollToSelection(scrollToSelection bool) tea.Cmd {
 		focusChangeCmd = l.blurSelectedItem()
 	}
 
-	// Calculate all item positions and total height
-	l.calculateItemPositions()
+	// Only calculate positions if the list is dirty
+	if l.positionsDirty {
+		l.calculateItemPositions()
+		l.positionsDirty = false
+	}
 
 	// Render only visible items
 	l.renderMu.Lock()
@@ -575,18 +606,18 @@ func (l *list[T]) scrollToSelection() {
 	if l.selectedItem == "" {
 		return
 	}
-	
+
 	inx, ok := l.indexMap.Get(l.selectedItem)
 	if !ok || inx < 0 || inx >= len(l.itemPositions) {
 		l.selectedItem = ""
 		l.setDefaultSelected()
 		return
 	}
-	
+
 	rItem := l.itemPositions[inx]
 
 	start, end := l.viewPosition()
-	
+
 	// item bigger or equal to the viewport - show from start
 	if rItem.height >= l.height {
 		if l.direction == DirectionForward {
@@ -598,7 +629,7 @@ func (l *list[T]) scrollToSelection() {
 		}
 		return
 	}
-	
+
 	// if we are moving by item we want to move the offset so that the
 	// whole item is visible not just portions of it
 	if l.movingByItem {
@@ -623,21 +654,21 @@ func (l *list[T]) scrollToSelection() {
 			l.offset = rItem.start
 		} else {
 			if l.virtualHeight > 0 {
-			l.offset = l.virtualHeight - rItem.end
-		} else {
-			l.offset = 0
-		}
+				l.offset = l.virtualHeight - rItem.end
+			} else {
+				l.offset = 0
+			}
 		}
 	} else if rItem.end > end {
 		// If item is below the viewport, make it the last item
 		if l.direction == DirectionForward {
-			l.offset = max(0, rItem.end - l.height + 1)
+			l.offset = max(0, rItem.end-l.height+1)
 		} else {
 			if l.virtualHeight > 0 {
-			l.offset = max(0, l.virtualHeight - rItem.start - l.height + 1)
-		} else {
-			l.offset = 0
-		}
+				l.offset = max(0, l.virtualHeight-rItem.start-l.height+1)
+			} else {
+				l.offset = 0
+			}
 		}
 	}
 }
@@ -647,7 +678,7 @@ func (l *list[T]) changeSelectionWhenScrolling() tea.Cmd {
 	if !ok || inx < 0 || inx >= len(l.itemPositions) {
 		return nil
 	}
-	
+
 	rItem := l.itemPositions[inx]
 	start, end := l.viewPosition()
 	// item bigger than the viewport do nothing
@@ -809,18 +840,16 @@ func (l *list[T]) blurSelectedItem() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-
-
 // calculateItemPositions calculates and caches the position and height of all items.
 // This is O(n) but only called when the list structure changes significantly.
 func (l *list[T]) calculateItemPositions() {
 	itemsLen := l.items.Len()
-	
+
 	// Resize positions slice if needed
 	if len(l.itemPositions) != itemsLen {
 		l.itemPositions = make([]itemPosition, itemsLen)
 	}
-	
+
 	currentHeight := 0
 	// Always calculate positions in forward order (logical positions)
 	for i := 0; i < itemsLen; i++ {
@@ -837,15 +866,15 @@ func (l *list[T]) calculateItemPositions() {
 			view = item.View()
 			l.viewCache.Set(item.ID(), view)
 		}
-		
+
 		height := lipgloss.Height(view)
-		
+
 		l.itemPositions[i] = itemPosition{
 			height: height,
 			start:  currentHeight,
 			end:    currentHeight + height - 1,
 		}
-		
+
 		currentHeight += height
 		if i < itemsLen-1 {
 			currentHeight += l.gap
@@ -862,47 +891,47 @@ func (l *list[T]) updateItemPosition(index int) {
 	if index < 0 || index >= itemsLen {
 		return
 	}
-	
+
 	item, ok := l.items.Get(index)
 	if !ok {
 		return
 	}
-	
+
 	// Get new height
 	view := item.View()
 	l.viewCache.Set(item.ID(), view)
 	newHeight := lipgloss.Height(view)
-	
+
 	// If height hasn't changed, no need to update
 	if index < len(l.itemPositions) && l.itemPositions[index].height == newHeight {
 		return
 	}
-	
+
 	// Calculate starting position (from previous item or 0)
 	var startPos int
 	if index > 0 {
 		startPos = l.itemPositions[index-1].end + 1 + l.gap
 	}
-	
+
 	// Update this item
 	oldHeight := 0
 	if index < len(l.itemPositions) {
 		oldHeight = l.itemPositions[index].height
 	}
 	heightDiff := newHeight - oldHeight
-	
+
 	l.itemPositions[index] = itemPosition{
 		height: newHeight,
 		start:  startPos,
 		end:    startPos + newHeight - 1,
 	}
-	
+
 	// Update all subsequent items' positions (shift by heightDiff)
 	for i := index + 1; i < len(l.itemPositions); i++ {
 		l.itemPositions[i].start += heightDiff
 		l.itemPositions[i].end += heightDiff
 	}
-	
+
 	// Update total height
 	l.virtualHeight += heightDiff
 }
@@ -915,28 +944,28 @@ func (l *list[T]) renderVirtualScrolling() string {
 
 	// Calculate viewport bounds
 	viewStart, viewEnd := l.viewPosition()
-	
+
 	// Check if we have any positions calculated
 	if len(l.itemPositions) == 0 {
 		// No positions calculated yet, return empty viewport
 		return ""
 	}
-	
+
 	// Find which items are visible
 	var visibleItems []struct {
 		item  T
 		pos   itemPosition
 		index int
 	}
-	
+
 	itemsLen := l.items.Len()
 	for i := 0; i < itemsLen; i++ {
 		if i >= len(l.itemPositions) {
 			continue
 		}
-		
+
 		pos := l.itemPositions[i]
-		
+
 		// Check if item is visible (overlaps with viewport)
 		if pos.end >= viewStart && pos.start <= viewEnd {
 			item, ok := l.items.Get(i)
@@ -949,17 +978,17 @@ func (l *list[T]) renderVirtualScrolling() string {
 				index int
 			}{item, pos, i})
 		}
-		
+
 		// Early exit if we've passed the viewport
 		if pos.start > viewEnd {
 			break
 		}
 	}
-	
+
 	// Build the rendered output
 	var lines []string
 	currentLine := viewStart
-	
+
 	for _, vis := range visibleItems {
 		// Get or render the item's view
 		var view string
@@ -969,9 +998,9 @@ func (l *list[T]) renderVirtualScrolling() string {
 			view = vis.item.View()
 			l.viewCache.Set(vis.item.ID(), view)
 		}
-		
+
 		itemLines := strings.Split(view, "\n")
-		
+
 		// Add gap lines before item if needed (except for first item)
 		if vis.index > 0 && currentLine < vis.pos.start {
 			gapLines := vis.pos.start - currentLine
@@ -980,21 +1009,21 @@ func (l *list[T]) renderVirtualScrolling() string {
 				currentLine++
 			}
 		}
-		
+
 		// Determine which lines of this item to include
 		startLine := 0
 		if vis.pos.start < viewStart {
 			// Item starts before viewport, skip some lines
 			startLine = viewStart - vis.pos.start
 		}
-		
+
 		// Add the item's visible lines
 		for i := startLine; i < len(itemLines) && currentLine <= viewEnd; i++ {
 			lines = append(lines, itemLines[i])
 			currentLine++
 		}
 	}
-	
+
 	// For content that fits entirely in viewport, don't pad with empty lines
 	// Only pad if we have scrolled or if content is larger than viewport
 	if l.virtualHeight > l.height || l.offset > 0 {
@@ -1002,17 +1031,15 @@ func (l *list[T]) renderVirtualScrolling() string {
 		for len(lines) < l.height {
 			lines = append(lines, "")
 		}
-		
+
 		// Trim to viewport height
 		if len(lines) > l.height {
 			lines = lines[:l.height]
 		}
 	}
-	
+
 	return strings.Join(lines, "\n")
 }
-
-
 
 // AppendItem implements List.
 func (l *list[T]) AppendItem(item T) tea.Cmd {
@@ -1027,6 +1054,10 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 	}
+
+	// Mark positions as dirty
+	l.positionsDirty = true
+
 	if l.width > 0 && l.height > 0 {
 		cmd = item.SetSize(l.width, l.height)
 		if cmd != nil {
@@ -1043,20 +1074,8 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-		} else {
-			// Get the new item's position to adjust offset
-			newInx := l.items.Len() - 1
-			if newInx < len(l.itemPositions) {
-				newItem := l.itemPositions[newInx]
-				newLines := newItem.height
-				if l.items.Len() > 1 {
-					newLines += l.gap
-				}
-				if l.virtualHeight > 0 {
-					l.offset = min(l.virtualHeight-1, l.offset+newLines)
-				}
-			}
 		}
+		// Note: We can't adjust offset based on item height here since positions aren't calculated yet
 	}
 	return tea.Sequence(cmds...)
 }
@@ -1249,10 +1268,10 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 	if l.width > 0 && l.height > 0 {
 		cmds = append(cmds, item.SetSize(l.width, l.height))
 	}
-	
-	// Recalculate positions after prepending
-	l.calculateItemPositions()
-	
+
+	// Mark positions as dirty
+	l.positionsDirty = true
+
 	if l.direction == DirectionForward {
 		if l.offset == 0 {
 			// If we're at the top, stay at the top
@@ -1262,6 +1281,11 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 		} else {
+			// Note: We need to calculate positions to adjust offset properly
+			// This is one case where we might need to calculate immediately
+			l.calculateItemPositions()
+			l.positionsDirty = false
+
 			// Adjust offset to maintain viewport position
 			// The prepended item is at index 0
 			if len(l.itemPositions) > 0 {
@@ -1387,6 +1411,7 @@ func (l *list[T]) reset(selectedItem string) tea.Cmd {
 	l.viewCache = csync.NewMap[string, string]()
 	l.itemPositions = nil // Will be recalculated
 	l.virtualHeight = 0
+	l.positionsDirty = true // Mark as dirty
 	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 		if l.width > 0 && l.height > 0 {
@@ -1413,60 +1438,21 @@ func (l *list[T]) SetSize(width int, height int) tea.Cmd {
 func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 	var cmds []tea.Cmd
 	if inx, ok := l.indexMap.Get(id); ok {
-		// Store old item position info before update
-		var oldItemPos itemPosition
-		hasOldItem := false
-		if inx < len(l.itemPositions) {
-			oldItemPos = l.itemPositions[inx]
-			hasOldItem = true
-		}
-
 		// Update the item
 		l.items.Set(inx, item)
-		
+
 		// Clear cache for this item
 		l.viewCache.Del(id)
-		
-		// Recalculate positions to get new height
-		l.calculateItemPositions()
-		
-		// Adjust offset if item height changed and it's outside the viewport
-		if hasOldItem && inx < len(l.itemPositions) {
-			newItemPos := l.itemPositions[inx]
-			heightDiff := newItemPos.height - oldItemPos.height
-			
-			if heightDiff != 0 {
-				// Get current viewport position
-				viewStart, viewEnd := l.viewPosition()
-				
-				if l.direction == DirectionForward {
-					// Item is above viewport if its end is before viewport start
-					if oldItemPos.end < viewStart {
-						// Adjust offset to maintain viewport content
-						l.offset = max(0, l.offset + heightDiff)
-					}
-				} else {
-					// For backward direction:
-					// Check if item is outside the current viewport
-					// Item is completely below viewport if its start is after viewport end
-					if oldItemPos.start > viewEnd {
-						// Item below viewport increased height, increase offset to maintain view
-						l.offset = max(0, l.offset + heightDiff)
-					} else if oldItemPos.end < viewStart {
-						// Item is completely above viewport
-						// No offset adjustment needed for items above in backward direction
-						// because they don't affect the view from bottom
-					}
-				}
-			}
-		}
-		
-		// Re-render with updated positions and offset
+
+		// Mark positions as dirty for recalculation
+		l.positionsDirty = true
+
+		// Re-render with updated positions
 		cmd := l.renderWithScrollToSelection(false)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		
+
 		cmds = append(cmds, item.Init())
 		if l.width > 0 && l.height > 0 {
 			cmds = append(cmds, item.SetSize(l.width, l.height))
