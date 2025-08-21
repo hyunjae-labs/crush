@@ -99,10 +99,10 @@ type list[T Item] struct {
 	items    *csync.Slice[T]
 
 	// Virtual scrolling fields - using slices for O(1) index access
-	itemPositions  []itemPosition             // Position info for each item by index
-	virtualHeight  int                        // Total height of all items
-	viewCache      *csync.Map[string, string] // Optional cache for rendered views
-	positionsDirty bool                       // Flag to track if positions need recalculation
+	itemPositions                []itemPosition             // Position info for each item by index
+	virtualHeight                int                        // Total height of all items
+	viewCache                    *csync.Map[string, string] // Optional cache for rendered views
+	shouldCalculateItemPositions bool
 
 	renderMu sync.Mutex
 	rendered string
@@ -191,15 +191,15 @@ func New[T Item](items []T, opts ...ListOption) List[T] {
 			keyMap:    DefaultKeyMap(),
 			focused:   true,
 		},
-		items:              csync.NewSliceFrom(items),
-		indexMap:           csync.NewMap[string, int](),
-		itemPositions:      make([]itemPosition, len(items)),
-		viewCache:          csync.NewMap[string, string](),
-		positionsDirty:     true, // Mark as dirty initially
-		selectionStartCol:  -1,
-		selectionStartLine: -1,
-		selectionEndLine:   -1,
-		selectionEndCol:    -1,
+		items:                        csync.NewSliceFrom(items),
+		indexMap:                     csync.NewMap[string, int](),
+		itemPositions:                make([]itemPosition, len(items)),
+		viewCache:                    csync.NewMap[string, string](),
+		shouldCalculateItemPositions: true,
+		selectionStartCol:            -1,
+		selectionStartLine:           -1,
+		selectionEndLine:             -1,
+		selectionEndCol:              -1,
 	}
 	for _, opt := range opts {
 		opt(list.confOptions)
@@ -308,9 +308,9 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if l.focused {
 			switch {
 			case key.Matches(msg, l.keyMap.Down):
-				return l, l.MoveDown(ViewportDefaultScrollSize)
+				return l, l.SelectItemBelow()
 			case key.Matches(msg, l.keyMap.Up):
-				return l, l.MoveUp(ViewportDefaultScrollSize)
+				return l, l.SelectItemAbove()
 			case key.Matches(msg, l.keyMap.DownOneItem):
 				return l, l.SelectItemBelow()
 			case key.Matches(msg, l.keyMap.UpOneItem):
@@ -573,21 +573,20 @@ func (l *list[T]) renderWithScrollToSelection(scrollToSelection bool) tea.Cmd {
 		focusChangeCmd = l.blurSelectedItem()
 	}
 
-	// Only calculate positions if the list is dirty
-	if l.positionsDirty {
+	if l.shouldCalculateItemPositions {
 		l.calculateItemPositions()
-		l.positionsDirty = false
+		l.shouldCalculateItemPositions = false
+	}
+
+	// Scroll to selected item BEFORE rendering if focused and requested
+	if l.focused && scrollToSelection {
+		l.scrollToSelection()
 	}
 
 	// Render only visible items
 	l.renderMu.Lock()
 	l.rendered = l.renderVirtualScrolling()
 	l.renderMu.Unlock()
-
-	// Scroll to selected item if focused and requested
-	if l.focused && scrollToSelection {
-		l.scrollToSelection()
-	}
 
 	return focusChangeCmd
 }
@@ -1055,8 +1054,7 @@ func (l *list[T]) AppendItem(item T) tea.Cmd {
 		l.indexMap.Set(item.ID(), inx)
 	}
 
-	// Mark positions as dirty
-	l.positionsDirty = true
+	l.shouldCalculateItemPositions = true
 
 	if l.width > 0 && l.height > 0 {
 		cmd = item.SetSize(l.width, l.height)
@@ -1199,8 +1197,9 @@ func (l *list[T]) MoveDown(n int) tea.Cmd {
 	}
 
 	if oldOffset == l.offset {
-		// no change in offset, so no need to change selection
-		return nil
+		// Even if offset didn't change, we might need to change selection
+		// if we're at the edge of the scrollable area
+		return l.changeSelectionWhenScrolling()
 	}
 	// if we are not actively selecting move the whole selection down
 	if l.hasSelection() && !l.selectionActive {
@@ -1232,8 +1231,9 @@ func (l *list[T]) MoveUp(n int) tea.Cmd {
 	}
 
 	if oldOffset == l.offset {
-		// no change in offset, so no need to change selection
-		return nil
+		// Even if offset didn't change, we might need to change selection
+		// if we're at the edge of the scrollable area
+		return l.changeSelectionWhenScrolling()
 	}
 
 	if l.hasSelection() && !l.selectionActive {
@@ -1269,8 +1269,7 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 		cmds = append(cmds, item.SetSize(l.width, l.height))
 	}
 
-	// Mark positions as dirty
-	l.positionsDirty = true
+	l.shouldCalculateItemPositions = true
 
 	if l.direction == DirectionForward {
 		if l.offset == 0 {
@@ -1284,7 +1283,7 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 			// Note: We need to calculate positions to adjust offset properly
 			// This is one case where we might need to calculate immediately
 			l.calculateItemPositions()
-			l.positionsDirty = false
+			l.shouldCalculateItemPositions = false
 
 			// Adjust offset to maintain viewport position
 			// The prepended item is at index 0
@@ -1411,7 +1410,7 @@ func (l *list[T]) reset(selectedItem string) tea.Cmd {
 	l.viewCache = csync.NewMap[string, string]()
 	l.itemPositions = nil // Will be recalculated
 	l.virtualHeight = 0
-	l.positionsDirty = true // Mark as dirty
+	l.shouldCalculateItemPositions = true
 	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 		if l.width > 0 && l.height > 0 {
@@ -1445,7 +1444,7 @@ func (l *list[T]) UpdateItem(id string, item T) tea.Cmd {
 		l.viewCache.Del(id)
 
 		// Mark positions as dirty for recalculation
-		l.positionsDirty = true
+		l.shouldCalculateItemPositions = true
 
 		// Re-render with updated positions
 		cmd := l.renderWithScrollToSelection(false)
