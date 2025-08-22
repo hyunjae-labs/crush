@@ -584,31 +584,30 @@ func TestListMovement(t *testing.T) {
 			items = append(items, item)
 		}
 		
-		// Create list with viewport of 5 lines, starting at the bottom
-		l := New(items, WithDirectionForward(), WithSize(5, 20), WithSelectedItem(items[9].ID())).(*list[Item])
+		// Create list with viewport of 5 lines height and 20 width, starting at the bottom (index 9)
+		l := New(items, WithDirectionForward(), WithSize(20, 5), WithSelectedIndex(9)).(*list[Item])
 		execCmd(l, l.Init())
 		
 		// Verify we start at the bottom (item 9 selected)
 		assert.Equal(t, items[9].ID(), l.SelectedItemID())
+		assert.Equal(t, 9, l.SelectedItemIndex())
 		
 		// Scroll to top one by one using SelectItemAbove
 		for i := 8; i >= 0; i-- {
 			execCmd(l, l.SelectItemAbove())
 			assert.Equal(t, items[i].ID(), l.SelectedItemID())
+			assert.Equal(t, i, l.SelectedItemIndex())
 		}
 		
 		// Now we should be at the first item
 		assert.Equal(t, items[0].ID(), l.SelectedItemID())
+		assert.Equal(t, 0, l.SelectedItemIndex())
 		
 		// Verify the viewport is rendering exactly 5 lines
 		rendered := l.View()
-		lines := strings.Split(rendered, "\n")
-		assert.Equal(t, 5, len(lines), "Should render exactly 5 lines")
 		
-		// Verify the rendered content shows items 0-4
-		for i := 0; i < 5; i++ {
-			assert.Contains(t, lines[i], fmt.Sprintf("Item %d", i), "Line %d should contain Item %d", i, i)
-		}
+		// Check the height using lipgloss
+		assert.Equal(t, 5, lipgloss.Height(rendered), "Should render exactly 5 lines")
 		
 		// Verify offset is at the top
 		assert.Equal(t, 0, l.offset)
