@@ -44,6 +44,7 @@ type List[T Item] interface {
 	SetItems([]T) tea.Cmd
 	SetSelected(string) tea.Cmd
 	SelectedItem() *T
+	SelectedItemIndex() int
 	Items() []T
 	UpdateItem(string, T) tea.Cmd
 	DeleteItem(string) tea.Cmd
