@@ -574,6 +574,50 @@ func TestListMovement(t *testing.T) {
 		assert.Equal(t, 10, lipgloss.Height(l.rendered))
 		golden.RequireEqual(t, []byte(l.View()))
 	})
+
+	t.Run("should scroll to top with SelectItemAbove and render 5 lines", func(t *testing.T) {
+		t.Parallel()
+		// Create 10 items
+		items := []Item{}
+		for i := range 10 {
+			item := NewSelectableItem(fmt.Sprintf("Item %d", i))
+			items = append(items, item)
+		}
+		
+		// Create list with viewport of 5 lines, starting at the bottom
+		l := New(items, WithDirectionForward(), WithSize(5, 20), WithSelectedItem(items[9].ID())).(*list[Item])
+		execCmd(l, l.Init())
+		
+		// Verify we start at the bottom (item 9 selected)
+		assert.Equal(t, items[9].ID(), l.SelectedItemID())
+		
+		// Scroll to top one by one using SelectItemAbove
+		for i := 8; i >= 0; i-- {
+			execCmd(l, l.SelectItemAbove())
+			assert.Equal(t, items[i].ID(), l.SelectedItemID())
+		}
+		
+		// Now we should be at the first item
+		assert.Equal(t, items[0].ID(), l.SelectedItemID())
+		
+		// Verify the viewport is rendering exactly 5 lines
+		rendered := l.View()
+		lines := strings.Split(rendered, "\n")
+		assert.Equal(t, 5, len(lines), "Should render exactly 5 lines")
+		
+		// Verify the rendered content shows items 0-4
+		for i := 0; i < 5; i++ {
+			assert.Contains(t, lines[i], fmt.Sprintf("Item %d", i), "Line %d should contain Item %d", i, i)
+		}
+		
+		// Verify offset is at the top
+		assert.Equal(t, 0, l.offset)
+		
+		// Verify the viewport position
+		start, end := l.viewPosition()
+		assert.Equal(t, 0, start, "View should start at position 0")
+		assert.Equal(t, 4, end, "View should end at position 4")
+	})
 }
 
 type SelectableItem interface {
