@@ -1388,6 +1388,12 @@ func (l *list[T]) SelectedItemID() string {
 	return item.ID()
 }
 
+// SelectedItemIndex returns the index of the currently selected item.
+// Returns -1 if no item is selected.
+func (l *list[T]) SelectedItemIndex() int {
+	return l.selectedIndex
+}
+
 // SetItems implements List.
 func (l *list[T]) SetItems(items []T) tea.Cmd {
 	l.items.SetSlice(items)
