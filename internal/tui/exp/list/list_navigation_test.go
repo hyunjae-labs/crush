@@ -77,7 +77,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		execCmdNav(l, l.Init())
 
 		// Initial state - first item should be selected
-		assert.Equal(t, "item1", l.selectedItem)
+		assert.Equal(t, "item1", l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 
 		// Navigate down to item 2
@@ -86,7 +86,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		}))
 		execCmdNav(l, cmd)
 
-		assert.Equal(t, "item2", l.selectedItem)
+		assert.Equal(t, "item2", l.SelectedItemID())
 		// Item 2 should be fully visible
 		view := l.View()
 		assert.Contains(t, view, "Item 2 (3 lines)")
@@ -99,7 +99,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		}))
 		execCmdNav(l, cmd)
 
-		assert.Equal(t, "item3", l.selectedItem)
+		assert.Equal(t, "item3", l.SelectedItemID())
 		view = l.View()
 		assert.Contains(t, view, "Item 3 (1 line)")
 
@@ -109,7 +109,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		}))
 		execCmdNav(l, cmd)
 
-		assert.Equal(t, "item4", l.selectedItem)
+		assert.Equal(t, "item4", l.SelectedItemID())
 		view = l.View()
 		// All lines of item 4 should be visible
 		assert.Contains(t, view, "Item 4 (4 lines)")
@@ -123,7 +123,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		}))
 		execCmdNav(l, cmd)
 
-		assert.Equal(t, "item3", l.selectedItem)
+		assert.Equal(t, "item3", l.SelectedItemID())
 		view = l.View()
 		assert.Contains(t, view, "Item 3 (1 line)")
 
@@ -133,7 +133,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		}))
 		execCmdNav(l, cmd)
 
-		assert.Equal(t, "item2", l.selectedItem)
+		assert.Equal(t, "item2", l.SelectedItemID())
 		view = l.View()
 		// All lines of item 2 should be visible
 		assert.Contains(t, view, "Item 2 (3 lines)")
@@ -203,7 +203,7 @@ func TestArrowKeyNavigation(t *testing.T) {
 		}))
 		execCmdNav(l, cmd)
 
-		assert.Equal(t, "item2", l.selectedItem)
+		assert.Equal(t, "item2", l.SelectedItemID())
 		view := l.View()
 
 		// Should show the item from the top

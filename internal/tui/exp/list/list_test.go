@@ -27,7 +27,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, items[0].ID(), l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
 		require.Equal(t, 5, l.items.Len())
@@ -56,7 +56,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[4].ID(), l.selectedItem)
+		assert.Equal(t, items[4].ID(), l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 5, l.indexMap.Len())
 		require.Equal(t, 5, l.items.Len())
@@ -86,7 +86,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, items[0].ID(), l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -116,7 +116,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[29].ID(), l.selectedItem)
+		assert.Equal(t, items[29].ID(), l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -149,7 +149,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[0].ID(), l.selectedItem)
+		assert.Equal(t, items[0].ID(), l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -189,7 +189,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[29].ID(), l.selectedItem)
+		assert.Equal(t, items[29].ID(), l.SelectedItemID())
 		assert.Equal(t, 0, l.offset)
 		require.Equal(t, 30, l.indexMap.Len())
 		require.Equal(t, 30, l.items.Len())
@@ -230,7 +230,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[10].ID(), l.selectedItem)
+		assert.Equal(t, items[10].ID(), l.SelectedItemID())
 
 		golden.RequireEqual(t, []byte(l.View()))
 	})
@@ -248,7 +248,7 @@ func TestList(t *testing.T) {
 		execCmd(l, l.Init())
 
 		// should select item 10
-		assert.Equal(t, items[10].ID(), l.selectedItem)
+		assert.Equal(t, items[10].ID(), l.SelectedItemID())
 
 		golden.RequireEqual(t, []byte(l.View()))
 	})
