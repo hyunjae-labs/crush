@@ -84,7 +84,7 @@ type confOptions struct {
 	wrap          bool
 	keyMap        KeyMap
 	direction     direction
-	selectedIndex int // Changed from string to int for index-based selection
+	selectedIndex int
 	focused       bool
 	resize        bool
 	enableMouse   bool
@@ -98,10 +98,9 @@ type list[T Item] struct {
 	indexMap *csync.Map[string, int]
 	items    *csync.Slice[T]
 
-	// Virtual scrolling fields - using slices for O(1) index access
-	itemPositions                []itemPosition             // Position info for each item by index
-	virtualHeight                int                        // Total height of all items
-	viewCache                    *csync.Map[string, string] // Optional cache for rendered views
+	itemPositions                []itemPosition
+	virtualHeight                int
+	viewCache                    *csync.Map[string, string]
 	shouldCalculateItemPositions bool
 
 	renderMu sync.Mutex
@@ -1090,7 +1089,7 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	
+
 	// Check if we're deleting the selected item
 	if l.selectedIndex == inx {
 		// Adjust selection
@@ -1105,7 +1104,7 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 		// Adjust index if selected item is after deleted item
 		l.selectedIndex--
 	}
-	
+
 	l.items.Delete(inx)
 	l.viewCache.Del(id)
 	// Rebuild index map
@@ -1113,7 +1112,7 @@ func (l *list[T]) DeleteItem(id string) tea.Cmd {
 	for inx, item := range slices.Collect(l.items.Seq()) {
 		l.indexMap.Set(item.ID(), inx)
 	}
-	
+
 	cmd := l.render()
 	if l.rendered != "" {
 		renderedHeight := l.virtualHeight
@@ -1309,12 +1308,12 @@ func (l *list[T]) PrependItem(item T) tea.Cmd {
 		// since offset is from the bottom
 		cmds = append(cmds, l.render())
 	}
-	
+
 	// Adjust selected index since we prepended
 	if l.selectedIndex >= 0 {
 		l.selectedIndex++
 	}
-	
+
 	return tea.Batch(cmds...)
 }
 
@@ -1418,7 +1417,7 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 	var cmds []tea.Cmd
 	l.rendered = ""
 	l.offset = 0
-	
+
 	// Convert ID to index if provided
 	if selectedItemID != "" {
 		if inx, ok := l.indexMap.Get(selectedItemID); ok {
@@ -1429,7 +1428,7 @@ func (l *list[T]) reset(selectedItemID string) tea.Cmd {
 	} else {
 		l.selectedIndex = -1
 	}
-	
+
 	l.indexMap = csync.NewMap[string, int]()
 	l.viewCache = csync.NewMap[string, string]()
 	l.itemPositions = nil // Will be recalculated
