@@ -1,7 +1,6 @@
 package prompt
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,7 +39,7 @@ func TestExpandPath(t *testing.T) {
 			name:  "environment variable expansion",
 			input: "$HOME",
 			expected: func() string {
-				return os.Getenv("HOME")
+				return home.Dir()
 			},
 		},
 		{
