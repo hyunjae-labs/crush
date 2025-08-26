@@ -1,495 +1,210 @@
-# Crush
+# 🚀 Crush - 온프레미스 Claude API 지원
 
-<p align="center">
-    <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/adc1a6f4-b284-4603-836c-59038caa2e8b" /></a><br />
-    <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
-    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/workflows/build/badge.svg" alt="Build Status"></a>
-</p>
+회사 내부 Claude API 서버와 완벽하게 연동되는 Crush CLI 도구입니다.
 
-<p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
+## ⚡ 빠른 시작
 
-<p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
-
-## Features
-
-- **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
-- **Flexible:** switch LLMs mid-session while preserving context
-- **Session-Based:** maintain multiple work sessions and contexts per project
-- **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
-- **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
-- **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), FreeBSD, OpenBSD, and NetBSD
-
-## Installation
-
-Use a package manager:
-
+### 1단계: 저장소 클론
 ```bash
-# Homebrew
-brew install charmbracelet/tap/crush
-
-# NPM
-npm install -g @charmland/crush
-
-# Arch Linux (btw)
-yay -S crush-bin
-
-# Nix
-nix run github:numtide/nix-ai-tools#crush
+git clone https://github.com/hyunjae-labs/crush-onpremise.git
+cd crush-onpremise
 ```
 
-Windows users:
-
+### 2단계: 환경변수 설정
 ```bash
-# Winget
-winget install charmbracelet.crush
+# Windows (cmd)
+set CRUSH_ANTHROPIC_BASE_URL=https://h-chat-api.autoever.com/v2/api/claude
+set CRUSH_ANTHROPIC_API_KEY=당신의-API-키
 
-# Scoop
-scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
-scoop install crush
+# Windows (PowerShell)
+$env:CRUSH_ANTHROPIC_BASE_URL="https://h-chat-api.autoever.com/v2/api/claude"
+$env:CRUSH_ANTHROPIC_API_KEY="당신의-API-키"
+
+# Linux/Mac
+export CRUSH_ANTHROPIC_BASE_URL="https://h-chat-api.autoever.com/v2/api/claude"
+export CRUSH_ANTHROPIC_API_KEY="당신의-API-키"
 ```
 
-<details>
-<summary><strong>Nix (NUR)</strong></summary>
-
-Crush is available via [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`.
-
-You can also try out Crush via `nix-shell`:
-
+### 3단계: 빌드 및 실행
 ```bash
-# Add the NUR channel.
-nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
-nix-channel --update
+# Go 빌드
+go build -o crush.exe .
 
-# Get Crush in a Nix shell.
-nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
+# 실행
+./crush.exe
+
+# 또는 직접 실행
+go run . "안녕하세요, 테스트입니다"
 ```
 
-</details>
+## 📋 요구사항
 
-<details>
-<summary><strong>Debian/Ubuntu</strong></summary>
+- **Go 1.21 이상** (https://golang.org/dl/)
+- **회사 네트워크 접근** (VPN 필요시 연결)
+- **API 키** (회사 IT팀에서 발급)
 
+## 🔧 상세 설치 가이드
+
+### Go 설치 (처음 사용시)
+1. https://golang.org/dl/ 에서 최신 Go 다운로드
+2. 설치 후 터미널에서 `go version` 확인
+3. `go version go1.21.0` 또는 더 높은 버전 표시되면 성공
+
+### API 키 발급 받기
+1. 회사 IT팀에 "Claude API 키 발급" 요청
+2. 받은 API 키를 `CRUSH_ANTHROPIC_API_KEY` 환경변수에 설정
+
+### 네트워크 연결 확인
 ```bash
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install crush
+# 회사 서버 연결 테스트
+curl -I https://h-chat-api.autoever.com/v2/api/claude/messages
+# 응답이 오면 네트워크 정상
 ```
 
-</details>
+## ⚙️ 환경변수 상세
 
-<details>
-<summary><strong>Fedora/RHEL</strong></summary>
+| 변수명 | 설명 | 예시 |
+|--------|------|------|
+| `CRUSH_ANTHROPIC_BASE_URL` | **필수** - 온프레미스 API 서버 주소 | `https://h-chat-api.autoever.com/v2/api/claude` |
+| `CRUSH_ANTHROPIC_API_KEY` | **필수** - 인증을 위한 API 키 | `sk-your-company-api-key-here` |
 
+## 🎯 사용법
+
+### 기본 사용
 ```bash
-echo '[charm]
-name=Charm
-baseurl=https://repo.charm.sh/yum/
-enabled=1
-gpgcheck=1
-gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
-sudo yum install crush
+# 텍스트 입력 후 엔터
+./crush.exe
+> 안녕하세요, 코드 리뷰를 도와주세요
+
+# 직접 질문
+./crush.exe "Python 코드 최적화 방법을 알려주세요"
+
+# 파이프라인 사용
+echo "이 에러를 해결해주세요" | ./crush.exe
 ```
 
-</details>
-
-Or, download it:
-
-- [Packages][releases] are available in Debian and RPM formats
-- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
-
-[releases]: https://github.com/charmbracelet/crush/releases
-
-Or just install it with Go:
-
-```
-go install github.com/charmbracelet/crush@latest
-```
-
-> [!WARNING]
-> Productivity may increase when using Crush and you may find yourself nerd
-> sniped when first using the application. If the symptoms persist, join the
-> [Discord][discord] and nerd snipe the rest of us.
-
-## Getting Started
-
-The quickest way to get started is to grab an API key for your preferred
-provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
-Crush. You'll be prompted to enter your API key.
-
-That said, you can also set environment variables for preferred providers.
-
-| Environment Variable       | Provider                                           |
-| -------------------------- | -------------------------------------------------- |
-| `ANTHROPIC_API_KEY`        | Anthropic                                          |
-| `OPENAI_API_KEY`           | OpenAI                                             |
-| `OPENROUTER_API_KEY`       | OpenRouter                                         |
-| `GEMINI_API_KEY`           | Google Gemini                                      |
-| `VERTEXAI_PROJECT`         | Google Cloud VertexAI (Gemini)                     |
-| `VERTEXAI_LOCATION`        | Google Cloud VertexAI (Gemini)                     |
-| `GROQ_API_KEY`             | Groq                                               |
-| `AWS_ACCESS_KEY_ID`        | AWS Bedrock (Claude)                               |
-| `AWS_SECRET_ACCESS_KEY`    | AWS Bedrock (Claude)                               |
-| `AWS_REGION`               | AWS Bedrock (Claude)                               |
-| `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
-| `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
-| `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
-
-### By the Way
-
-Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?
-
-Crush’s default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open source repository of Crush-compatible models, and you’re welcome to contribute.
-
-<a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
-
-## Configuration
-
-Crush runs great with no configuration. That said, if you do need or want to
-customize Crush, configuration can be added either local to the project itself,
-or globally, with the following priority:
-
-1. `.crush.json`
-2. `crush.json`
-3. `$HOME/.config/crush/crush.json` (Windows: `%USERPROFILE%\AppData\Local\crush\crush.json`)
-
-Configuration itself is stored as a JSON object:
-
-```json
-{
-   "this-setting": {"this": "that"},
-   "that-setting": ["ceci", "cela"]
-}
-```
-
-As an additional note, Crush also stores ephemeral data, such as application state, in one additional location:
-
+### 파일 처리
 ```bash
-# Unix
-$HOME/.local/share/crush/crush.json
+# 코드 파일 분석
+./crush.exe < main.py
 
+# 여러 파일 처리
+cat *.js | ./crush.exe "이 코드들을 리팩토링해주세요"
+```
+
+## 🔍 문제 해결
+
+### 자주 발생하는 오류와 해결법
+
+#### 1. `authentication failed (401)`
+```
+❌ 에러: authentication failed (401): check CRUSH_ANTHROPIC_API_KEY
+✅ 해결: API 키 확인 및 재설정
+```
+
+#### 2. `endpoint not found (404)`
+```
+❌ 에러: endpoint not found (404): check CRUSH_ANTHROPIC_BASE_URL
+✅ 해결: BASE_URL이 정확한지 확인
+     올바른 형식: https://h-chat-api.autoever.com/v2/api/claude
+```
+
+#### 3. `network request failed`
+```
+❌ 에러: network request failed: dial tcp: no such host
+✅ 해결: 
+  1. VPN 연결 확인
+  2. 회사 네트워크 접근 권한 확인
+  3. 방화벽/프록시 설정 확인
+```
+
+#### 4. `server error (500)`
+```
+❌ 에러: server error (500): on-premise service issue
+✅ 해결: 
+  1. 잠시 후 다시 시도
+  2. 회사 IT팀에 서버 상태 문의
+```
+
+### 디버깅 팁
+
+#### 환경변수 확인
+```bash
 # Windows
-%LOCALAPPDATA%\crush\crush.json
+echo %CRUSH_ANTHROPIC_BASE_URL%
+echo %CRUSH_ANTHROPIC_API_KEY%
+
+# Linux/Mac
+echo $CRUSH_ANTHROPIC_BASE_URL
+echo $CRUSH_ANTHROPIC_API_KEY
 ```
 
-### LSPs
-
-Crush can use LSPs for additional context to help inform its decisions, just
-like you would. LSPs can be added manually like so:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "lsp": {
-    "go": {
-      "command": "gopls",
-      "env": {
-        "GOTOOLCHAIN": "go1.24.5"
-      }
-    },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": ["--stdio"]
-    },
-    "nix": {
-      "command": "nil"
-    }
-  }
-}
-```
-
-### MCPs
-
-Crush also supports Model Context Protocol (MCP) servers through three
-transport types: `stdio` for command-line servers, `http` for HTTP endpoints,
-and `sse` for Server-Sent Events. Environment variable expansion is supported
-using `$(echo $VAR)` syntax.
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "mcp": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/mcp-server.js"],
-      "env": {
-        "NODE_ENV": "production"
-      }
-    },
-    "github": {
-      "type": "http",
-      "url": "https://example.com/mcp/",
-      "headers": {
-        "Authorization": "$(echo Bearer $EXAMPLE_MCP_TOKEN)"
-      }
-    },
-    "streaming-service": {
-      "type": "sse",
-      "url": "https://example.com/mcp/sse",
-      "headers": {
-        "API-Key": "$(echo $API_KEY)"
-      }
-    }
-  }
-}
-```
-
-### Ignoring Files
-
-Crush respects `.gitignore` files by default, but you can also create a
-`.crushignore` file to specify additional files and directories that Crush
-should ignore. This is useful for excluding files that you want in version
-control but don't want Crush to consider when providing context.
-
-The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
-in the root of your project or in subdirectories.
-
-### Allowing Tools
-
-By default, Crush will ask you for permission before running tool calls. If
-you'd like, you can allow tools to be executed without prompting you for
-permissions. Use this with care.
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "permissions": {
-    "allowed_tools": [
-      "view",
-      "ls",
-      "grep",
-      "edit",
-      "mcp_context7_get-library-doc"
-    ]
-  }
-}
-```
-
-You can also skip all permission prompts entirely by running Crush with the
-`--yolo` flag. Be very, very careful with this feature.
-
-### Local Models
-
-Local models can also be configured via OpenAI-compatible API. Here are two common examples:
-
-#### Ollama
-
-```json
-{
-  "providers": {
-    "ollama": {
-      "name": "Ollama",
-      "base_url": "http://localhost:11434/v1/",
-      "type": "openai",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen3:30b",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### LM Studio
-
-```json
-{
-  "providers": {
-    "lmstudio": {
-      "name": "LM Studio",
-      "base_url": "http://localhost:1234/v1/",
-      "type": "openai",
-      "models": [
-        {
-          "name": "Qwen 3 30B",
-          "id": "qwen/qwen3-30b-a3b-2507",
-          "context_window": 256000,
-          "default_max_tokens": 20000
-        }
-      ]
-    }
-  }
-}
-```
-
-### Custom Providers
-
-Crush supports custom provider configurations for both OpenAI-compatible and
-Anthropic-compatible APIs.
-
-#### OpenAI-Compatible APIs
-
-Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
-API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "deepseek": {
-      "type": "openai",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "$DEEPSEEK_API_KEY",
-      "models": [
-        {
-          "id": "deepseek-chat",
-          "name": "Deepseek V3",
-          "cost_per_1m_in": 0.27,
-          "cost_per_1m_out": 1.1,
-          "cost_per_1m_in_cached": 0.07,
-          "cost_per_1m_out_cached": 1.1,
-          "context_window": 64000,
-          "default_max_tokens": 5000
-        }
-      ]
-    }
-  }
-}
-```
-
-#### Anthropic-Compatible APIs
-
-Custom Anthropic-compatible providers follow this format:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "custom-anthropic": {
-      "type": "anthropic",
-      "base_url": "https://api.anthropic.com/v1",
-      "api_key": "$ANTHROPIC_API_KEY",
-      "extra_headers": {
-        "anthropic-version": "2023-06-01"
-      },
-      "models": [
-        {
-          "id": "claude-sonnet-4-20250514",
-          "name": "Claude Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
-```
-
-### Amazon Bedrock
-
-Crush currently supports running Anthropic models through Bedrock, with caching disabled.
-
-* A Bedrock provider will appear once you have AWS configured, i.e. `aws configure`
-* Crush also expects the `AWS_REGION` or `AWS_DEFAULT_REGION` to be set
-* To use a specific AWS profile set `AWS_PROFILE` in your environment, i.e. `AWS_PROFILE=myprofile crush`
-
-### Vertex AI Platform
-
-Vertex AI will appear in the list of available providers when `VERTEXAI_PROJECT` and `VERTEXAI_LOCATION` are set. You will also need to be authenticated:
-
+#### 상세 로그 확인
 ```bash
-gcloud auth application-default login
+# 디버그 모드로 실행
+CRUSH_LOG_LEVEL=debug ./crush.exe
 ```
 
-To add specific models to the configuration, configure as such:
-
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "vertexai": {
-      "models": [
-        {
-          "id": "claude-sonnet-4@20250514",
-          "name": "VertexAI Sonnet 4",
-          "cost_per_1m_in": 3,
-          "cost_per_1m_out": 15,
-          "cost_per_1m_in_cached": 3.75,
-          "cost_per_1m_out_cached": 0.3,
-          "context_window": 200000,
-          "default_max_tokens": 50000,
-          "can_reason": true,
-          "supports_attachments": true
-        }
-      ]
-    }
-  }
-}
-```
-
-## A Note on Claude Max and GitHub Copilot
-
-Crush only supports model providers through official, compliant APIs. We do not
-support or endorse any methods that rely on personal Claude Max and GitHub Copilot
-accounts or OAuth workarounds, which may violate Anthropic and Microsoft’s
-Terms of Service.
-
-We’re committed to building sustainable, trusted integrations with model
-providers. If you’re a provider interested in working with us,
-[reach out](mailto:vt100@charm.sh).
-
-## Logging
-
-Sometimes you need to look at logs. Luckily, Crush logs all sorts of
-stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
-
-The CLI also contains some helper commands to make perusing recent logs easier:
-
+#### 연결 테스트
 ```bash
-# Print the last 1000 lines
-crush logs
-
-# Print the last 500 lines
-crush logs --tail 500
-
-# Follow logs in real time
-crush logs --follow
+# 수동 API 테스트
+curl -X POST "https://h-chat-api.autoever.com/v2/api/claude/messages" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: your-api-key" \
+  -d '{
+    "model": "claude-sonnet-4",
+    "max_tokens": 1000,
+    "messages": [{"role": "user", "content": "테스트"}]
+  }'
 ```
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in the
-config:
+## 📊 기술적 특징
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "options": {
-    "debug": true,
-    "debug_lsp": true
-  }
-}
+- ✅ **SDK 우회**: Anthropic SDK 대신 직접 HTTP 클라이언트 사용
+- ✅ **완벽한 호환성**: 회사 API 형식과 100% 일치
+- ✅ **에러 복구**: "canceled" 에러 완전 해결
+- ✅ **최대 성능**: 8192 토큰 지원, 60초 타임아웃
+- ✅ **보안**: Authorization 헤더 지원
+
+## 🏢 회사 환경 최적화
+
+### 프록시 환경에서 사용
+```bash
+# 프록시 설정 (필요시)
+set HTTP_PROXY=http://proxy.company.com:8080
+set HTTPS_PROXY=http://proxy.company.com:8080
 ```
 
-## Whatcha think?
+### 영구 환경변수 설정
 
-We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
+#### Windows
+1. **시스템 속성** → **고급** → **환경 변수**
+2. **시스템 변수**에 추가:
+   - `CRUSH_ANTHROPIC_BASE_URL` = `https://h-chat-api.autoever.com/v2/api/claude`
+   - `CRUSH_ANTHROPIC_API_KEY` = `당신의-API-키`
 
-- [Twitter](https://twitter.com/charmcli)
-- [Discord][discord]
-- [Slack](https://charm.land/slack)
-- [The Fediverse](https://mastodon.social/@charmcli)
+#### Linux/Mac
+```bash
+# ~/.bashrc 또는 ~/.zshrc에 추가
+echo 'export CRUSH_ANTHROPIC_BASE_URL="https://h-chat-api.autoever.com/v2/api/claude"' >> ~/.bashrc
+echo 'export CRUSH_ANTHROPIC_API_KEY="당신의-API-키"' >> ~/.bashrc
+source ~/.bashrc
+```
 
-[discord]: https://charm.land/discord
+## 📞 지원
 
-## License
+문제가 발생하면:
+1. **이 README의 문제 해결 섹션** 확인
+2. **에러 메시지**와 **로그**를 정확히 기록
+3. **네트워크 연결** 및 **환경변수** 재확인
 
-[FSL-1.1-MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE.md)
+## 🔐 보안 주의사항
+
+- ❌ API 키를 코드에 하드코딩하지 마세요
+- ❌ API 키를 public 저장소에 커밋하지 마세요  
+- ✅ 환경변수로만 API 키 관리
+- ✅ 회사 보안 정책 준수
 
 ---
 
-Part of [Charm](https://charm.land).
-
-<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-next.jpg" /></a>
-
-<!--prettier-ignore-->
-Charm热爱开源 • Charm loves open source
+**🎉 이제 회사에서 Claude를 마음껏 사용하세요!**
