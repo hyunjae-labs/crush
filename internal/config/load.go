@@ -191,6 +191,12 @@ func (c *Config) configureProviders(env env.Env, resolver VariableResolver, know
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
+		case catwalk.InferenceProviderAnthropic:
+			// 온프레미스 환경을 위한 커스텀 BaseURL 처리
+			if customBaseURL := env.Get("CRUSH_ANTHROPIC_BASE_URL"); customBaseURL != "" {
+				prepared.BaseURL = customBaseURL
+				slog.Info("Using custom Anthropic base URL from CRUSH_ANTHROPIC_BASE_URL", "url", customBaseURL)
+			}
 		case catwalk.InferenceProviderVertexAI:
 			if !hasVertexCredentials(env) {
 				if configExists {

@@ -1,12 +1,14 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,7 +32,8 @@ type anthropicClient struct {
 	providerOptions   providerClientOptions
 	tp                AnthropicClientType
 	client            anthropic.Client
-	adjustedMaxTokens int // Used when context limit is hit
+	adjustedMaxTokens int  // Used when context limit is hit
+	isOnPremise       bool // 온프레미스 모드 플래그
 }
 
 type AnthropicClient ProviderClient
@@ -44,10 +47,20 @@ const (
 )
 
 func newAnthropicClient(opts providerClientOptions, tp AnthropicClientType) AnthropicClient {
+	// 온프레미스 환경 체크 (대소문자 무시, trailing slash 정규화)
+	normalizedURL := strings.ToLower(strings.TrimRight(opts.baseURL, "/"))
+	isOnPremise := opts.baseURL != "" && strings.HasSuffix(normalizedURL, "/v2/api/claude")
+	
+	var client anthropic.Client
+	if !isOnPremise {
+		client = createAnthropicClient(opts, tp)
+	}
+	
 	return &anthropicClient{
 		providerOptions: opts,
 		tp:              tp,
-		client:          createAnthropicClient(opts, tp),
+		client:          client,
+		isOnPremise:     isOnPremise,
 	}
 }
 
@@ -284,6 +297,11 @@ func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, to
 }
 
 func (a *anthropicClient) send(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
+	// 온프레미스 모드 체크
+	if a.isOnPremise {
+		return a.sendOnPremise(ctx, messages, tools)
+	}
+	
 	attempts := 0
 	for {
 		attempts++
@@ -333,6 +351,22 @@ func (a *anthropicClient) send(ctx context.Context, messages []message.Message, 
 }
 
 func (a *anthropicClient) stream(ctx context.Context, messages []message.Message, tools []tools.BaseTool) <-chan ProviderEvent {
+	// 온프레미스 모드 체크
+	if a.isOnPremise {
+		eventChan := make(chan ProviderEvent)
+		go func() {
+			defer close(eventChan)
+			response, err := a.sendOnPremise(ctx, messages, tools)
+			if err != nil {
+				eventChan <- ProviderEvent{Type: EventError, Error: err}
+				return
+			}
+			eventChan <- ProviderEvent{Type: EventContentDelta, Content: response.Content}
+			eventChan <- ProviderEvent{Type: EventComplete, Response: response}
+		}()
+		return eventChan
+	}
+	
 	attempts := 0
 	eventChan := make(chan ProviderEvent)
 	go func() {
@@ -584,4 +618,150 @@ func (a *anthropicClient) usage(msg anthropic.Message) TokenUsage {
 
 func (a *anthropicClient) Model() catwalk.Model {
 	return a.providerOptions.model(a.providerOptions.modelType)
+}
+
+// sendOnPremise는 온프레미스 서버에 직접 HTTP 요청을 보냅니다
+func (a *anthropicClient) sendOnPremise(ctx context.Context, messages []message.Message, tools []tools.BaseTool) (response *ProviderResponse, err error) {
+	// Panic 복구 안전장치
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in sendOnPremise: %v", r)
+			slog.Error("Panic recovered in sendOnPremise", "error", r)
+		}
+	}()
+	
+	// API 키 검증
+	if a.providerOptions.apiKey == "" {
+		return nil, fmt.Errorf("API key is required for on-premise authentication")
+	}
+	// 간단한 메시지 변환 (텍스트만 지원)
+	var anthropicMessages []map[string]string
+	var systemMessage string
+	
+	for _, msg := range messages {
+		switch msg.Role {
+		case message.System:
+			systemMessage = msg.Content().Text
+		case message.User, message.Assistant:
+			anthropicMessages = append(anthropicMessages, map[string]string{
+				"role":    string(msg.Role),
+				"content": msg.Content().Text,
+			})
+		}
+	}
+	
+	// max_tokens 결정 (우선순위: adjustedMaxTokens > providerOptions > 최대값)
+	maxTokens := 8192 // Claude 3.5 Sonnet 최대 출력 토큰
+	if a.adjustedMaxTokens > 0 {
+		maxTokens = a.adjustedMaxTokens
+	} else if a.providerOptions.maxTokens > 0 {
+		maxTokens = int(a.providerOptions.maxTokens)
+	}
+	
+	// 요청 구성 (회사 온프레미스 API 형식 정확히 일치)
+	request := map[string]interface{}{
+		"model":      a.Model().ID, // 모델 ID 사용
+		"max_tokens": maxTokens,    // 최대 8192 토큰
+		"stream":     false,        // 스트리밍 비활성화
+		"messages":   anthropicMessages,
+	}
+	if systemMessage != "" {
+		request["system"] = systemMessage
+	}
+	
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	
+	// HTTP 요청 생성 (trailing slash 안전 처리)
+	baseURL := strings.TrimRight(a.providerOptions.baseURL, "/")
+	url := baseURL + "/messages"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", a.providerOptions.apiKey)
+	
+	slog.Info("OnPremise sending request", "url", url, "model", a.Model().ID)
+	
+	// Context가 이미 취소되었는지 확인
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("request cancelled before execution: %w", ctx.Err())
+	}
+	
+	// HTTP 클라이언트 설정 (Context는 Request에 이미 embedded됨)
+	client := &http.Client{Timeout: 60 * time.Second}
+	
+	slog.Debug("OnPremise request starting", "url", url, "model", a.Model().ID)
+	
+	// HTTP 요청 실행 (Context 처리 자동으로 됨)
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		slog.Error("OnPremise request failed", "error", err, "url", url)
+		return nil, fmt.Errorf("network request failed to %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	
+	// 응답 읽기
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	
+	if resp.StatusCode != http.StatusOK {
+		errorMsg := string(body)
+		slog.Error("OnPremise API error", "status", resp.StatusCode, "body", errorMsg)
+		
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			return nil, fmt.Errorf("authentication failed (401): check CRUSH_ANTHROPIC_API_KEY")
+		case http.StatusForbidden:
+			return nil, fmt.Errorf("access forbidden (403): insufficient permissions")
+		case http.StatusNotFound:
+			return nil, fmt.Errorf("endpoint not found (404): check CRUSH_ANTHROPIC_BASE_URL")
+		case http.StatusInternalServerError:
+			return nil, fmt.Errorf("server error (500): on-premise service issue")
+		default:
+			return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, errorMsg)
+		}
+	}
+	
+	// 응답 파싱
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	
+	// 콘텐츠 추출
+	var responseText string
+	if content, ok := result["content"].([]interface{}); ok && len(content) > 0 {
+		if textBlock, ok := content[0].(map[string]interface{}); ok {
+			if text, ok := textBlock["text"].(string); ok {
+				responseText = text
+			}
+		}
+	}
+	
+	// Usage 정보 추출 (있으면)
+	var inputTokens, outputTokens int64
+	if usage, ok := result["usage"].(map[string]interface{}); ok {
+		if input, ok := usage["input_tokens"].(float64); ok {
+			inputTokens = int64(input)
+		}
+		if output, ok := usage["output_tokens"].(float64); ok {
+			outputTokens = int64(output)
+		}
+	}
+	
+	return &ProviderResponse{
+		Content: responseText,
+		Usage: TokenUsage{
+			InputTokens:  inputTokens,
+			OutputTokens: outputTokens,
+		},
+		FinishReason: message.FinishReasonEndTurn,
+	}, nil
 }
